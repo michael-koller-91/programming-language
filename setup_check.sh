@@ -4,6 +4,6 @@
 
 ./zig run hello.zig
 
-./qbe add.ssa -o add.s
+./qbe add.qbe -o add.s
 cc -o add add.s
 ./add
