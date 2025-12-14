@@ -1,4 +1,7 @@
+*.s
+
 downloads
 lib
+
 qbe
 zig
