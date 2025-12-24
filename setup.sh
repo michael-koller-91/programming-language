@@ -15,12 +15,9 @@ cp qbe-1.2/qbe .
 # move to downloads
 mv qbe-1.2 downloads
 
-# download and unpack Zig
-wget https://ziglang.org/builds/zig-x86_64-linux-0.16.0-dev.1484+d0ba6642b.tar.xz
-tar -xf zig-x86_64-linux-0.16.0-dev.1484+d0ba6642b.tar.xz
-rm zig-x86_64-linux-0.16.0-dev.1484+d0ba6642b.tar.xz
-# copy the binary and lib
-cp zig-x86_64-linux-0.16.0-dev.1484+d0ba6642b/zig .
-cp -r zig-x86_64-linux-0.16.0-dev.1484+d0ba6642b/lib .
+# download and unpack Odin
+wget https://github.com/odin-lang/Odin/releases/download/dev-2025-12a/odin-linux-amd64-dev-2025-12a.tar.gz
+tar -xf odin-linux-amd64-dev-2025-12a.tar.gz
+rm odin-linux-amd64-dev-2025-12a.tar.gz
 # move to downloads
-mv zig-x86_64-linux-0.16.0-dev.1484+d0ba6642b downloads
+mv odin-linux-amd64-dev-2025-12a downloads
