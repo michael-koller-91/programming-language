@@ -2,8 +2,8 @@
 
 # a quick check if setup.sh worked
 
-./zig run hello.zig
+odin run hello.odin -file
 
-./qbe add.qbe -o add.s
-cc -o add add.s
-./add
+qbe hello.qbe -o hello.s
+cc -o hello hello.s
+./hello
