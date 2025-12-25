@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:log"
 import "core:os"
 import "core:strings"
 import "core:unicode"
@@ -13,11 +14,14 @@ Token :: struct {
 	offset:   int,
 }
 
-tokenize_file :: proc(filepath: string) -> [dynamic]Token {
+tokenize_file :: proc(filepath: string) -> []Token {
 	data, ok := os.read_entire_file(filepath, context.allocator)
 	defer delete(data, context.allocator)
-	if !ok {
-		fmt.println("Could not read file", filepath)
+
+	if ok {
+		log.info("Read file", filepath)
+	} else {
+		fmt.eprintln("[ERROR] Could not read file", filepath)
 		os.exit(-1)
 	}
 
@@ -64,12 +68,24 @@ tokenize_file :: proc(filepath: string) -> [dynamic]Token {
 			ch_prev = ch
 		}
 	}
-	return tokens
+	log.info("Finished tokenizing", filepath)
+	return tokens[:]
+}
+
+delete_tokens :: proc(tokens: []Token) {
+	for t in tokens {
+		delete(t.line)
+		delete(t.word)
+	}
+	delete(tokens)
 }
 
 main :: proc() {
-	tokens := tokenize_file("main.prola")
-	defer delete(tokens)
+	context.logger = log.create_console_logger()
+
+	tokens := tokenize_file("programs/01_tokens.prola")
+	defer delete_tokens(tokens)
+
 	for t in tokens {
 		fmt.println(t)
 	}
