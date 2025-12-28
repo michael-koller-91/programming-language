@@ -18,7 +18,6 @@ Token :: struct {
 		int,
 		f64,
 	},
-	consumed: bool,
 }
 
 Token_Kind :: enum {
@@ -43,23 +42,16 @@ Expr_Kind :: enum {
 	Constant_Int,
 }
 
-
-Expr :: struct {
-	kind:  Expr_Kind,
-	value: Expr_Value,
-}
-
 Expr_Plus :: struct {
-	kind:  Expr_Kind,
-	left:  ^Expr,
-	right: ^Expr,
+	left:  Expr,
+	right: Expr,
 }
 
 Expr_Const_Int :: struct {
 	value: int,
 }
 
-Expr_Value :: union {
+Expr :: union {
 	^Expr_Plus,
 	^Expr_Const_Int,
 }
@@ -230,34 +222,47 @@ delete_tokens :: proc(tokens: []Token) {
 	delete(tokens)
 }
 
-parse_constant :: proc(parser: ^Parser) -> ^Expr {
+parse_constant :: proc(parser: ^Parser) -> Expr {
 	t := &parser.tokens[parser.pos]
 	parser.pos += 1
-	expr_const_int := new(Expr_Const_Int, context.temp_allocator)
-	expr_const_int.value = t.value.?
-	expr := new(Expr, context.temp_allocator)
-	expr^.kind = Expr_Kind.Constant_Int
-	expr^.value = expr_const_int
+	expr := new(Expr_Const_Int, context.temp_allocator)
+	expr.value = t.value.?
+	log.info("( pos =", parser.pos - 1, ") constant =", t.value)
 	return expr
 }
 
-parse_plus :: proc(parser: ^Parser) -> ^Expr {
+parse_plus :: proc(parser: ^Parser) -> Expr {
 	left := parse_constant(parser)
 	if left == nil {return nil}
-	if parser.tokens[parser.pos].kind == Token_Kind.Plus {
+	if parser.pos < len(parser.tokens) && parser.tokens[parser.pos].kind == Token_Kind.Plus {
 		parser.pos += 1
-		right := parse_constant(parser)
+		right := parse_plus(parser)
 		if right == nil {return nil}
-		expr_plus := new(Expr_Plus, context.temp_allocator)
-		expr_plus.kind = Expr_Kind.Plus
-		expr_plus.left = left
-		expr_plus.right = right
-		expr := new(Expr, context.temp_allocator)
-		expr^.kind = Expr_Kind.Plus
-		expr^.value = expr_plus
+		expr := new(Expr_Plus, context.temp_allocator)
+		expr.left = left
+		expr.right = right
+		log.info("( pos =", parser.pos - 1, ") return new expr")
 		return expr
 	}
+	log.info("( pos =", parser.pos, ") return left")
 	return left
+}
+
+print_tree :: proc(expr: Expr, depth: int) -> int {
+	for i in 0 ..< 2 * depth {fmt.print(" ")}
+	d := depth + 1
+
+	switch e in expr {
+	case ^Expr_Plus:
+		fmt.println("Plus:")
+		print_tree(e^.left, d)
+		print_tree(e^.right, d)
+		return d - 1
+	case ^Expr_Const_Int:
+		fmt.println("Const:", e^.value)
+		return d - 1
+	}
+	return 0
 }
 
 main :: proc() {
@@ -274,17 +279,10 @@ main :: proc() {
 		tokens = &tokens,
 		pos    = 0,
 	}
+
 	expr := parse_plus(&parser)
-	v := expr^.value
-	fmt.println(v)
-	l := v.(^Expr_Plus).left
-	fmt.println(l)
-	cl := l^.value
-	fmt.println(cl)
-	r := v.(^Expr_Plus).right
-	fmt.println(r)
-	cr := r^.value
-	fmt.println(cr)
+
+	print_tree(expr, 0)
 
 	defer free_all(context.temp_allocator)
 
