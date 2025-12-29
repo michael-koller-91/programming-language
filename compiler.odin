@@ -83,10 +83,12 @@ tokenize_file :: proc(filepath: string) -> []Token {
 	tokens: [dynamic]Token
 	line_number := 0
 	it := string(data)
-	for line in strings.split_lines_iterator(&it) {
+	line_loop: for line_with_comment in strings.split_lines_iterator(&it) {
 		line_number += 1
 		start := 0
 		end := 0
+
+		line := strings.split(line_with_comment, "#")[0]
 
 		ch_next := rune('.')
 		for i in 0 ..< len(line) {
@@ -104,7 +106,7 @@ tokenize_file :: proc(filepath: string) -> []Token {
 			case '+':
 				t := Token {
 					filename = filepath,
-					line     = strings.clone(line),
+					line     = strings.clone(line_with_comment),
 					word     = strings.clone("+"),
 					line_nr  = line_number,
 					offset   = i,
@@ -116,7 +118,7 @@ tokenize_file :: proc(filepath: string) -> []Token {
 			case '-':
 				t := Token {
 					filename = filepath,
-					line     = strings.clone(line),
+					line     = strings.clone(line_with_comment),
 					word     = strings.clone("-"),
 					line_nr  = line_number,
 					offset   = i,
@@ -128,7 +130,7 @@ tokenize_file :: proc(filepath: string) -> []Token {
 			case '*':
 				t := Token {
 					filename = filepath,
-					line     = strings.clone(line),
+					line     = strings.clone(line_with_comment),
 					word     = strings.clone("*"),
 					line_nr  = line_number,
 					offset   = i,
@@ -140,7 +142,7 @@ tokenize_file :: proc(filepath: string) -> []Token {
 			case '(':
 				t := Token {
 					filename = filepath,
-					line     = strings.clone(line),
+					line     = strings.clone(line_with_comment),
 					word     = strings.clone("("),
 					line_nr  = line_number,
 					offset   = i,
@@ -152,7 +154,7 @@ tokenize_file :: proc(filepath: string) -> []Token {
 			case ')':
 				t := Token {
 					filename = filepath,
-					line     = strings.clone(line),
+					line     = strings.clone(line_with_comment),
 					word     = strings.clone(")"),
 					line_nr  = line_number,
 					offset   = i,
@@ -166,7 +168,7 @@ tokenize_file :: proc(filepath: string) -> []Token {
 					end = i
 					t := Token {
 						filename = filepath,
-						line     = strings.clone(line),
+						line     = strings.clone(line_with_comment),
 						word     = strings.clone(line[start:end + 1]),
 						line_nr  = line_number,
 						offset   = start,
