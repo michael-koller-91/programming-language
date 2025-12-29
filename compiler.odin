@@ -182,18 +182,7 @@ tokenize_file :: proc(filepath: string) -> []Token {
 								t.kind = Token_Kind.Float
 								t.value = n
 							} else {
-								fmt.eprintln(line)
-								for i in 0 ..< start {
-									fmt.eprint(" ")
-								}
-								fmt.eprintln("^")
-								fmt.eprintfln(
-									"%s:%d:%d [ERROR] Could not parse as int or float.",
-									t.filename,
-									t.line_nr,
-									start,
-								)
-								os.exit(-1)
+								eprint_loc_and_exit(t, "Could not parse as int or float.")
 							}
 						}
 					} else {
@@ -210,7 +199,10 @@ tokenize_file :: proc(filepath: string) -> []Token {
 			}
 		}
 	}
-	log.info("Finished tokenizing", filepath)
+	for t in tokens {
+		log.infof("line %d: %s (%s)", t.line_nr, t.word, t.kind)
+	}
+	log.infof("Finished tokenizing %s. Found %d tokens.", filepath, len(tokens))
 	return tokens[:]
 }
 
@@ -222,7 +214,21 @@ delete_tokens :: proc(tokens: []Token) {
 	delete(tokens)
 }
 
+eprint_loc_and_exit :: proc(t: Token, msg: string) {
+	fmt.eprintln(t.line)
+	for i in 0 ..< t.offset {
+		fmt.eprint(" ")
+	}
+	fmt.eprintln("^")
+	fmt.eprintfln("%s:%d:%d [ERROR] %s", t.filename, t.line_nr, t.offset + 1, msg)
+	os.exit(1)
+}
+
 parse_constant :: proc(parser: ^Parser) -> Expr {
+	if parser.pos >= len(parser.tokens) {
+		t := parser.tokens[len(parser.tokens) - 1]
+		eprint_loc_and_exit(t, "Expected to find a constant next but found end of file.")
+	}
 	t := &parser.tokens[parser.pos]
 	parser.pos += 1
 	expr := new(Expr_Const_Int, context.temp_allocator)
@@ -271,18 +277,20 @@ main :: proc() {
 	tokens := tokenize_file("programs/02_add.prola")
 	defer delete_tokens(tokens)
 
-	for t in tokens {
-		fmt.println(t)
-	}
-
 	parser := Parser {
 		tokens = &tokens,
 		pos    = 0,
 	}
 
-	expr := parse_plus(&parser)
+	expressions: [dynamic]Expr
+	for parser.pos < len(parser.tokens) - 1 {
+		expr := parse_plus(&parser)
+		append(&expressions, expr)
+	}
 
-	print_tree(expr, 0)
+	for expr in expressions {
+		print_tree(expr, 0)
+	}
 
 	defer free_all(context.temp_allocator)
 
