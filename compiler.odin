@@ -37,21 +37,26 @@ Parser :: struct {
 	pos:    int,
 }
 
-Expr_Kind :: enum {
+Expr_Type :: enum {
 	Plus,
 	Constant_Int,
 }
 
 Expr_Plus :: struct {
-	left:  Expr,
-	right: Expr,
+	left:  ^Expr,
+	right: ^Expr,
 }
 
 Expr_Const_Int :: struct {
 	value: int,
 }
 
-Expr :: union {
+Expr :: struct {
+	type:  Expr_Type,
+	value: Expr_Value,
+}
+
+Expr_Value :: union {
 	^Expr_Plus,
 	^Expr_Const_Int,
 }
@@ -226,41 +231,55 @@ eprint_loc_and_exit :: proc(t: Token, msg: string) {
 	os.exit(1)
 }
 
-parse_constant :: proc(parser: ^Parser) -> Expr {
+parse_constant :: proc(parser: ^Parser) -> ^Expr {
 	if parser.pos >= len(parser.tokens) {
 		t := parser.tokens[len(parser.tokens) - 1]
 		eprint_loc_and_exit(t, "Expected to find a constant next but found end of file.")
 	}
 	t := &parser.tokens[parser.pos]
 	parser.pos += 1
-	expr := new(Expr_Const_Int, context.temp_allocator)
-	expr.value = t.value.?
+	expr_const := new(Expr_Const_Int, context.temp_allocator)
+	expr_const.value = t.value.?
 	log.info("( pos =", parser.pos - 1, ") constant =", t.value)
+	expr := new(Expr, context.temp_allocator)
+	expr.type = Expr_Type.Constant_Int
+	expr.value = expr_const
 	return expr
 }
 
-parse_plus :: proc(parser: ^Parser) -> Expr {
+parse_plus :: proc(parser: ^Parser) -> ^Expr {
 	left := parse_constant(parser)
 	if left == nil {return nil}
 	if parser.pos < len(parser.tokens) && parser.tokens[parser.pos].kind == Token_Kind.Plus {
 		parser.pos += 1
 		right := parse_plus(parser)
 		if right == nil {return nil}
-		expr := new(Expr_Plus, context.temp_allocator)
-		expr.left = left
-		expr.right = right
+		expr_plus := new(Expr_Plus, context.temp_allocator)
+		expr_plus.left = left
+		expr_plus.right = right
 		log.info("( pos =", parser.pos - 1, ") return new expr")
+		expr := new(Expr, context.temp_allocator)
+		expr.type = Expr_Type.Plus
+		expr.value = expr_plus
 		return expr
 	}
 	log.info("( pos =", parser.pos, ") return left")
 	return left
 }
 
-print_tree :: proc(expr: Expr, depth: int) -> int {
+compile_constant :: proc(expr: Expr, filepath_out: os.Handle) {
+	fmt.fprintln(filepath_out, expr)
+}
+
+compile_plus :: proc(expr: ^Expr, filepath_out: os.Handle) {
+	fmt.fprintln(filepath_out, expr^)
+}
+
+print_tree :: proc(expr: ^Expr, depth: int) -> int {
 	for i in 0 ..< 2 * depth {fmt.print(" ")}
 	d := depth + 1
 
-	switch e in expr {
+	switch e in expr^.value {
 	case ^Expr_Plus:
 		fmt.println("Plus:")
 		print_tree(e^.left, d)
@@ -283,28 +302,30 @@ main :: proc() {
 		tokens = &tokens,
 		pos    = 0,
 	}
-
 	expressions: [dynamic]Expr
 	for parser.pos < len(parser.tokens) - 1 {
 		expr := parse_plus(&parser)
-		append(&expressions, expr)
+		append(&expressions, expr^)
 	}
-
-	for expr in expressions {
-		print_tree(expr, 0)
-	}
-
 	defer free_all(context.temp_allocator)
 
-	//fmt.println()
+	for &expr in expressions {
+		print_tree(&expr, 0)
+	}
 
-	//fmt.println("export function w $main() {")
-	//fmt.println("@start")
-	//fmt.println("  %a =w add 34, 35")
-	//fmt.println("  call $printf(l $fmt, ..., w %r)")
-	//fmt.println("  ret 0")
-	//fmt.println("}")
-	//fmt.println("data $fmt = { b \"%d\\n\", b 0 }")
+
+	filepath_out := os.stdout
+	fmt.fprintln(filepath_out)
+	fmt.fprintln(filepath_out, "export function w $main() {")
+	fmt.fprintln(filepath_out, "@start")
+
+	for &expr in expressions {
+		compile_plus(&expr, filepath_out)
+	}
+
+	fmt.fprintln(filepath_out, "  ret 0")
+	fmt.fprintln(filepath_out, "}")
+	//fmt.fprintln("data $fmt = { b \"%d\\n\", b 0 }")
 
 	//export function w $main() {
 	//@start
