@@ -267,26 +267,26 @@ parse_plus :: proc(parser: ^Parser) -> ^Expr {
 	return left
 }
 
-compile_constant :: proc(expr: ^Expr, varnr: int, filepath_out: os.Handle) -> (int, bool) {
+compile_constant :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (int, bool) {
 	if expr.type == Expr_Type.Constant_Int {
 		const_int := expr.value.(^Expr_Const_Int)
-		fmt.fprintfln(filepath_out, "# compile_constant: %d", const_int.value)
-		fmt.fprintfln(filepath_out, "%%s%d =l copy %d", varnr, const_int.value)
+		fmt.fprintfln(file_out_handle, "  # compile_constant: %d", const_int.value)
+		fmt.fprintfln(file_out_handle, "  %%s%d =l copy %d", varnr, const_int.value)
 		log.info("wrote constant = ", const_int.value)
 		return varnr + 1, true
 	}
 	return varnr, false
 }
 
-compile_plus :: proc(expr: ^Expr, varnr: int, filepath_out: os.Handle) -> (int, bool) {
+compile_plus :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (int, bool) {
 	if expr.type == Expr_Type.Plus {
 		plus := expr.value.(^Expr_Plus)
-		varnr, wrote := compile_constant(plus.left, varnr, filepath_out)
+		varnr, wrote := compile_constant(plus.left, varnr, file_out_handle)
 		//if !wrote {return varnr, false}
-		varnr, wrote = compile_constant(plus.right, varnr, filepath_out)
+		varnr, wrote = compile_constant(plus.right, varnr, file_out_handle)
 		assert(varnr >= 2, "Expected at least two variables to perform + on.")
-		fmt.fprintln(filepath_out, "# compile_plus")
-		fmt.fprintfln(filepath_out, "%%s%d =l add %%s%d, %%s%d", varnr, varnr - 2, varnr - 1)
+		fmt.fprintln(file_out_handle, "  # compile_plus")
+		fmt.fprintfln(file_out_handle, "  %%s%d =l add %%s%d, %%s%d", varnr, varnr - 2, varnr - 1)
 		return varnr, true
 	}
 	return varnr, false
@@ -326,29 +326,41 @@ main :: proc() {
 	}
 	defer free_all(context.temp_allocator)
 
+	file_out_path := "foo.qbe"
+	file_out_handle, err := os.open(file_out_path, os.O_CREATE | os.O_WRONLY, 444)
+	if err == os.ERROR_NONE {
+		log.info("Opened file", file_out_path)
+	} else {
+		fmt.eprintln("[ERROR] Could not open file", file_out_path, ":", err)
+		os.exit(-1)
+	}
+	defer os.close(file_out_handle)
+
 	for &expr in expressions {
 		print_tree(&expr, 0)
 	}
 
 
-	filepath_out := os.stdout
-	fmt.fprintln(filepath_out)
-	fmt.fprintln(filepath_out, "export function w $main() {")
-	fmt.fprintln(filepath_out, "@start")
-	fmt.fprintln(filepath_out, "# -----------------------------------")
+	//file_out_handle := os.stdout
+	fmt.fprintln(file_out_handle, "export function w $main() {")
+	fmt.fprintln(file_out_handle, "@start")
+	fmt.fprintln(file_out_handle, "# -----------------------------------")
+
 
 	for &expr in expressions {
-		compile_plus(&expr, 0, filepath_out)
+		compile_plus(&expr, 0, file_out_handle)
 	}
 
-	fmt.fprintln(filepath_out, "# -----------------------------------")
-	fmt.fprintln(filepath_out, "  ret 0")
-	fmt.fprintln(filepath_out, "}")
-	//fmt.fprintln("data $fmt = { b \"%d\\n\", b 0 }")
+	fmt.fprintln(file_out_handle, "# -----------------------------------")
+	fmt.fprintln(file_out_handle, "  call $printf(l $fmt, ..., l %s2)")
+	fmt.fprintln(file_out_handle, "  ret 0")
+	fmt.fprintln(file_out_handle, "}")
+	fmt.fprintln(file_out_handle, "data $fmt = { b \"%d\\n\", b 0 }")
 
-	//export function w $main() {
-	//@start
-	//  %r =w call $puts(l $str)
-	//  ret 0
-	//}
+	file_out, ok := os.read_entire_file(file_out_path, context.allocator)
+	defer delete(file_out, context.allocator)
+
+	fmt.printfln("\nContents of %v:\n", file_out_path)
+	fmt.print(string(file_out))
+
 }
