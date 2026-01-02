@@ -267,12 +267,29 @@ parse_plus :: proc(parser: ^Parser) -> ^Expr {
 	return left
 }
 
-compile_constant :: proc(expr: Expr, filepath_out: os.Handle) {
-	fmt.fprintln(filepath_out, expr)
+compile_constant :: proc(expr: ^Expr, varnr: int, filepath_out: os.Handle) -> (int, bool) {
+	if expr.type == Expr_Type.Constant_Int {
+		const_int := expr.value.(^Expr_Const_Int)
+		fmt.fprintfln(filepath_out, "# compile_constant: %d", const_int.value)
+		fmt.fprintfln(filepath_out, "%%s%d =l copy %d", varnr, const_int.value)
+		log.info("wrote constant = ", const_int.value)
+		return varnr + 1, true
+	}
+	return varnr, false
 }
 
-compile_plus :: proc(expr: ^Expr, filepath_out: os.Handle) {
-	fmt.fprintln(filepath_out, expr^)
+compile_plus :: proc(expr: ^Expr, varnr: int, filepath_out: os.Handle) -> (int, bool) {
+	if expr.type == Expr_Type.Plus {
+		plus := expr.value.(^Expr_Plus)
+		varnr, wrote := compile_constant(plus.left, varnr, filepath_out)
+		//if !wrote {return varnr, false}
+		varnr, wrote = compile_constant(plus.right, varnr, filepath_out)
+		assert(varnr >= 2, "Expected at least two variables to perform + on.")
+		fmt.fprintln(filepath_out, "# compile_plus")
+		fmt.fprintfln(filepath_out, "%%s%d =l add %%s%d, %%s%d", varnr, varnr - 2, varnr - 1)
+		return varnr, true
+	}
+	return varnr, false
 }
 
 print_tree :: proc(expr: ^Expr, depth: int) -> int {
@@ -318,11 +335,13 @@ main :: proc() {
 	fmt.fprintln(filepath_out)
 	fmt.fprintln(filepath_out, "export function w $main() {")
 	fmt.fprintln(filepath_out, "@start")
+	fmt.fprintln(filepath_out, "# -----------------------------------")
 
 	for &expr in expressions {
-		compile_plus(&expr, filepath_out)
+		compile_plus(&expr, 0, filepath_out)
 	}
 
+	fmt.fprintln(filepath_out, "# -----------------------------------")
 	fmt.fprintln(filepath_out, "  ret 0")
 	fmt.fprintln(filepath_out, "}")
 	//fmt.fprintln("data $fmt = { b \"%d\\n\", b 0 }")
