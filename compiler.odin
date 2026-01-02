@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:os/os2"
 import "core:strconv"
 import "core:strings"
 import "core:unicode"
@@ -24,12 +25,11 @@ Token_Kind :: enum {
 	Lpar, // (
 	Rpar, // )
 	Int,
-	Float,
+	//Float,
 	Name,
-	Builtin,
-	Plus,
-	Minus,
-	Mult,
+	Add,
+	//Minus,
+	//Mult,
 }
 
 Parser :: struct {
@@ -38,16 +38,22 @@ Parser :: struct {
 }
 
 Expr_Type :: enum {
-	Plus,
-	Constant_Int,
+	Add,
+	Call,
+	Int,
 }
 
-Expr_Plus :: struct {
+Expr_Add :: struct {
 	left:  ^Expr,
 	right: ^Expr,
 }
 
-Expr_Const_Int :: struct {
+Expr_Call :: struct {
+	args: ^Expr, // TODO: one argument for now; should be a list though
+	name: string,
+}
+
+Expr_Int :: struct {
 	value: int,
 }
 
@@ -57,8 +63,9 @@ Expr :: struct {
 }
 
 Expr_Value :: union {
-	^Expr_Plus,
-	^Expr_Const_Int,
+	^Expr_Add,
+	^Expr_Call,
+	^Expr_Int,
 }
 
 
@@ -115,35 +122,35 @@ tokenize_file :: proc(filepath: string) -> []Token {
 					word     = strings.clone("+"),
 					line_nr  = line_number,
 					offset   = i,
-					kind     = Token_Kind.Plus,
+					kind     = Token_Kind.Add,
 				}
 				append(&tokens, t)
 				start = i + 1
 				continue
-			case '-':
-				t := Token {
-					filename = filepath,
-					line     = strings.clone(line_with_comment),
-					word     = strings.clone("-"),
-					line_nr  = line_number,
-					offset   = i,
-					kind     = Token_Kind.Minus,
-				}
-				append(&tokens, t)
-				start = i + 1
-				continue
-			case '*':
-				t := Token {
-					filename = filepath,
-					line     = strings.clone(line_with_comment),
-					word     = strings.clone("*"),
-					line_nr  = line_number,
-					offset   = i,
-					kind     = Token_Kind.Mult,
-				}
-				append(&tokens, t)
-				start = i + 1
-				continue
+			// case '-':
+			// 	t := Token {
+			// 		filename = filepath,
+			// 		line     = strings.clone(line_with_comment),
+			// 		word     = strings.clone("-"),
+			// 		line_nr  = line_number,
+			// 		offset   = i,
+			// 		kind     = Token_Kind.Minus,
+			// 	}
+			// 	append(&tokens, t)
+			// 	start = i + 1
+			// 	continue
+			// case '*':
+			// 	t := Token {
+			// 		filename = filepath,
+			// 		line     = strings.clone(line_with_comment),
+			// 		word     = strings.clone("*"),
+			// 		line_nr  = line_number,
+			// 		offset   = i,
+			// 		kind     = Token_Kind.Mult,
+			// 	}
+			// 	append(&tokens, t)
+			// 	start = i + 1
+			// 	continue
 			case '(':
 				t := Token {
 					filename = filepath,
@@ -184,20 +191,16 @@ tokenize_file :: proc(filepath: string) -> []Token {
 							t.kind = Token_Kind.Int
 							t.value = n
 						} else {
-							n, ok := strconv.parse_f64(t.word)
-							if ok {
-								t.kind = Token_Kind.Float
-								t.value = n
-							} else {
-								eprint_loc_and_exit(t, "Could not parse as int or float.")
-							}
+							// n, ok := strconv.parse_f64(t.word)
+							// if ok {
+							// 	t.kind = Token_Kind.Float
+							// 	t.value = n
+							// } else {
+							eprint_loc_and_exit(t, "Could not parse as int.")
+							// }
 						}
 					} else {
-						if t.word == "print" {
-							t.kind = Token_Kind.Builtin
-						} else {
-							t.kind = Token_Kind.Name
-						}
+						t.kind = Token_Kind.Name
 					}
 					start = i + 1
 					append(&tokens, t)
@@ -231,65 +234,116 @@ eprint_loc_and_exit :: proc(t: Token, msg: string) {
 	os.exit(1)
 }
 
-parse_constant :: proc(parser: ^Parser) -> ^Expr {
+// TODO: print Token_Kind in human readable form; maybe a proc token_kind_to_string or something
+expect_token :: proc(token: Token, expected_kind: Token_Kind) {
+	if token.kind != expected_kind {
+		eprint_loc_and_exit(
+			token,
+			fmt.aprintf("Expected Token_Kind %v but got %v", expected_kind, token.kind),
+		)
+	}
+}
+
+parse_args :: proc(parser: ^Parser) -> ^Expr {
+	t := parser.tokens[parser.pos]
+	expect_token(t, Token_Kind.Lpar)
+	parser.pos += 1
+
+	expr := parse_expr(parser)
+
+	t = parser.tokens[parser.pos]
+	expect_token(t, Token_Kind.Rpar)
+	parser.pos += 1
+
+	return expr
+}
+
+parse_unary :: proc(parser: ^Parser) -> ^Expr {
 	if parser.pos >= len(parser.tokens) {
 		t := parser.tokens[len(parser.tokens) - 1]
 		eprint_loc_and_exit(t, "Expected to find a constant next but found end of file.")
 	}
-	t := &parser.tokens[parser.pos]
+	t := parser.tokens[parser.pos]
 	parser.pos += 1
-	expr_const := new(Expr_Const_Int, context.temp_allocator)
-	expr_const.value = t.value.?
-	log.info("( pos =", parser.pos - 1, ") constant =", t.value)
-	expr := new(Expr, context.temp_allocator)
-	expr.type = Expr_Type.Constant_Int
-	expr.value = expr_const
-	return expr
+	switch t.kind {
+	case Token_Kind.Name:
+		expr_call := new(Expr_Call, context.temp_allocator)
+		expr_call.name = t.word
+		log.info("( pos =", parser.pos - 1, ") call =", t.word)
+		expr_call.args = parse_args(parser)
+		expr := new(Expr, context.temp_allocator)
+		expr.type = Expr_Type.Call
+		expr.value = expr_call
+		return expr
+	case Token_Kind.Int:
+		expr_int := new(Expr_Int, context.temp_allocator)
+		expr_int.value = t.value.?
+		log.info("( pos =", parser.pos - 1, ") int =", t.value)
+		expr := new(Expr, context.temp_allocator)
+		expr.type = Expr_Type.Int
+		expr.value = expr_int
+		return expr
+	case Token_Kind.Lpar:
+		assert(false, "unreachable")
+	case Token_Kind.Rpar:
+		assert(false, "unreachable")
+	case Token_Kind.Add: // nothing to do
+	}
+	return nil
 }
 
-parse_plus :: proc(parser: ^Parser) -> ^Expr {
-	left := parse_constant(parser)
+parse_expr :: proc(parser: ^Parser) -> ^Expr {
+	return parse_add(parser)
+}
+
+parse_add :: proc(parser: ^Parser) -> ^Expr {
+	left := parse_unary(parser)
 	if left == nil {return nil}
-	if parser.pos < len(parser.tokens) && parser.tokens[parser.pos].kind == Token_Kind.Plus {
+	if parser.pos < len(parser.tokens) && parser.tokens[parser.pos].kind == Token_Kind.Add {
 		parser.pos += 1
-		right := parse_plus(parser)
+		right := parse_add(parser)
 		if right == nil {return nil}
-		expr_plus := new(Expr_Plus, context.temp_allocator)
-		expr_plus.left = left
-		expr_plus.right = right
+		expr_add := new(Expr_Add, context.temp_allocator)
+		expr_add.left = left
+		expr_add.right = right
 		log.info("( pos =", parser.pos - 1, ") return new expr")
 		expr := new(Expr, context.temp_allocator)
-		expr.type = Expr_Type.Plus
-		expr.value = expr_plus
+		expr.type = Expr_Type.Add
+		expr.value = expr_add
 		return expr
 	}
 	log.info("( pos =", parser.pos, ") return left")
 	return left
 }
 
-compile_constant :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (int, bool) {
-	if expr.type == Expr_Type.Constant_Int {
-		const_int := expr.value.(^Expr_Const_Int)
-		fmt.fprintfln(file_out_handle, "  # compile_constant: %d", const_int.value)
+compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (int, bool) {
+	switch &e in expr.value {
+	case ^Expr_Add:
+		add := expr.value.(^Expr_Add)
+		varnr, wrote := compile_expr(add.left, varnr, file_out_handle)
+		varnr, wrote = compile_expr(add.right, varnr, file_out_handle)
+		assert(varnr >= 2, "Expected at least two variables to perform + on.")
+		fmt.fprintln(file_out_handle, "  # Expr_Add")
+		fmt.fprintfln(file_out_handle, "  %%s%d =l add %%s%d, %%s%d", varnr, varnr - 2, varnr - 1)
+		return varnr, true
+	case ^Expr_Call:
+		if e.name == "print" {
+			varnr, wrote := compile_expr(e.args, varnr, file_out_handle)
+			fmt.fprintfln(file_out_handle, "  # Expr_Call: %v()", e.name)
+			fmt.fprintfln(file_out_handle, "  call $printf(l $fmt_int, ..., l %%s%v)", varnr)
+			return varnr + 1, false
+		} else {
+			assert(false, fmt.aprintf("unknown call name: '%v'; not implemented", e.name))
+		}
+	case ^Expr_Int:
+		const_int := expr.value.(^Expr_Int)
+		fmt.fprintfln(file_out_handle, "  # Expr_Int: %v", const_int.value)
 		fmt.fprintfln(file_out_handle, "  %%s%d =l copy %d", varnr, const_int.value)
 		log.info("wrote constant = ", const_int.value)
 		return varnr + 1, true
 	}
-	return varnr, false
-}
-
-compile_plus :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (int, bool) {
-	if expr.type == Expr_Type.Plus {
-		plus := expr.value.(^Expr_Plus)
-		varnr, wrote := compile_constant(plus.left, varnr, file_out_handle)
-		//if !wrote {return varnr, false}
-		varnr, wrote = compile_constant(plus.right, varnr, file_out_handle)
-		assert(varnr >= 2, "Expected at least two variables to perform + on.")
-		fmt.fprintln(file_out_handle, "  # compile_plus")
-		fmt.fprintfln(file_out_handle, "  %%s%d =l add %%s%d, %%s%d", varnr, varnr - 2, varnr - 1)
-		return varnr, true
-	}
-	return varnr, false
+	assert(false, "unreachable")
+	return 0, false
 }
 
 print_tree :: proc(expr: ^Expr, depth: int) -> int {
@@ -297,16 +351,46 @@ print_tree :: proc(expr: ^Expr, depth: int) -> int {
 	d := depth + 1
 
 	switch e in expr^.value {
-	case ^Expr_Plus:
-		fmt.println("Plus:")
+	case ^Expr_Add:
+		fmt.println("Add:")
 		print_tree(e^.left, d)
 		print_tree(e^.right, d)
 		return d - 1
-	case ^Expr_Const_Int:
+	case ^Expr_Call:
+		fmt.printfln("Call: %v()", e^.name)
+		print_tree(e^.args, d)
+		return d - 1
+	case ^Expr_Int:
 		fmt.println("Const:", e^.value)
 		return d - 1
 	}
 	return 0
+}
+
+execute_command :: proc(cmd: string) {
+	state, stdout, stderr, err := os2.process_exec(
+		{command = strings.split(cmd, " ")},
+		context.allocator,
+	)
+	defer delete(stdout)
+	defer delete(stderr)
+	if err != nil {
+		fmt.eprintln("process_exec returned an error:", err)
+		os.exit(1)
+	}
+	if state.success {
+		fmt.printfln("[INFO] Executing command: %v", cmd)
+		fmt.print(string(stdout))
+	} else {
+		fmt.eprintfln("[ERROR]: Running command %v failed.", cmd)
+		fmt.eprintfln("[ERROR]: stdout:")
+		fmt.eprint(string(stdout))
+		fmt.eprintfln("[ERROR]: stderr:")
+		fmt.eprint(string(stderr))
+		fmt.eprintfln("[ERROR]: state:")
+		fmt.eprint(state)
+		os.exit(1)
+	}
 }
 
 main :: proc() {
@@ -321,7 +405,7 @@ main :: proc() {
 	}
 	expressions: [dynamic]Expr
 	for parser.pos < len(parser.tokens) - 1 {
-		expr := parse_plus(&parser)
+		expr := parse_expr(&parser)
 		append(&expressions, expr^)
 	}
 	defer free_all(context.temp_allocator)
@@ -340,22 +424,19 @@ main :: proc() {
 		print_tree(&expr, 0)
 	}
 
-
-	//file_out_handle := os.stdout
 	fmt.fprintln(file_out_handle, "export function w $main() {")
 	fmt.fprintln(file_out_handle, "@start")
 	fmt.fprintln(file_out_handle, "# -----------------------------------")
 
 
 	for &expr in expressions {
-		compile_plus(&expr, 0, file_out_handle)
+		compile_expr(&expr, 0, file_out_handle)
 	}
 
 	fmt.fprintln(file_out_handle, "# -----------------------------------")
-	fmt.fprintln(file_out_handle, "  call $printf(l $fmt, ..., l %s2)")
 	fmt.fprintln(file_out_handle, "  ret 0")
 	fmt.fprintln(file_out_handle, "}")
-	fmt.fprintln(file_out_handle, "data $fmt = { b \"%d\\n\", b 0 }")
+	fmt.fprintln(file_out_handle, "data $fmt_int = { b \"%d\\n\", b 0 }")
 
 	file_out, ok := os.read_entire_file(file_out_path, context.allocator)
 	defer delete(file_out, context.allocator)
@@ -363,4 +444,7 @@ main :: proc() {
 	fmt.printfln("\nContents of %v:\n", file_out_path)
 	fmt.print(string(file_out))
 
+	execute_command("qbe foo.qbe -o foo.s")
+	execute_command("cc -o foo foo.s")
+	execute_command("./foo")
 }
