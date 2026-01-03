@@ -552,8 +552,7 @@ print_tree :: proc(expr: ^Expr, depth: int) -> int {
 main :: proc() {
 	context.logger = log.create_console_logger()
 
-	//file_in_path := "programs/01_print_sums.prola"
-	file_in_path := "programs/02_print_products.prola"
+	file_in_path := "programs/01_arithmetics.prola"
 	file_out_base := compile_file(file_in_path)
 	build_executable(file_out_base)
 	stdout, stderr, ok := run_executable(file_out_base)
