@@ -71,30 +71,40 @@ Expr_Value :: union {
 }
 
 build_executable :: proc(file_base: string) {
-	execute_command(fmt.aprintf("qbe %v.qbe -o %v.s", file_base, file_base))
-	execute_command(fmt.aprintf("cc -o %v %v.s", file_base, file_base))
+	cmd1 := fmt.aprintf("qbe %v.qbe -o %v.s", file_base, file_base)
+	defer delete(cmd1)
+	execute_command(cmd1)
+
+	cmd2 := fmt.aprintf("cc -o %v %v.s", file_base, file_base)
+	defer delete(cmd2)
+	execute_command(cmd2)
 }
 
 run_executable :: proc(file_base: string) -> (string, string, bool) {
-	return execute_command_and_capture_out(fmt.aprintf("./%v", file_base))
+	cmd := fmt.aprintf("./%v", file_base)
+	defer delete(cmd)
+	return execute_command_and_capture_out(cmd)
 }
 
 execute_command_and_capture_out :: proc(cmd: string) -> (string, string, bool) {
-	state, stdout, stderr, err := os2.process_exec(
-		{command = strings.split(cmd, " ")},
-		context.allocator,
-	)
+	command := strings.split(cmd, " ")
+	defer delete(command)
+
+	state, stdout, stderr, err := os2.process_exec({command = command}, context.allocator)
+
 	if err != nil {
 		fmt.eprintfln("Error '%v' while executing '%v'", err, cmd)
 		os.exit(1)
 	}
-	if !state.success {
-		fmt.eprintfln("[ERROR]: Executing '%v' failed.", cmd)
-		fmt.eprintfln("[ERROR]: stdout:")
+	if state.success {
+		fmt.printfln("[CINFO] Executed: %v", cmd)
+	} else {
+		fmt.eprintfln("[CERROR]: Executing '%v' failed.", cmd)
+		fmt.eprintfln("[CERROR]: stdout:")
 		fmt.eprint(string(stdout))
-		fmt.eprintfln("[ERROR]: stderr:")
+		fmt.eprintfln("[CERROR]: stderr:")
 		fmt.eprint(string(stderr))
-		fmt.eprintfln("[ERROR]: state:")
+		fmt.eprintfln("[CERROR]: state:")
 		fmt.eprint(state)
 		os.exit(1)
 	}
@@ -105,7 +115,6 @@ execute_command_and_capture_out :: proc(cmd: string) -> (string, string, bool) {
 execute_command :: proc(cmd: string) {
 	stdout, stderr, ok := execute_command_and_capture_out(cmd)
 	if ok {
-		fmt.printfln("[INFO] Executed: %v", cmd)
 		fmt.print(string(stdout))
 	}
 	defer delete(stdout)
@@ -129,9 +138,9 @@ tokenize_file :: proc(filepath: string) -> []Token {
 	defer delete(data, context.allocator)
 
 	if ok {
-		fmt.println("[INFO] Read file", filepath)
+		fmt.println("[CINFO] Read file", filepath)
 	} else {
-		fmt.eprintln("[ERROR] Could not read file", filepath)
+		fmt.eprintln("[CERROR] Could not read file", filepath)
 		os.exit(-1)
 	}
 
@@ -143,7 +152,10 @@ tokenize_file :: proc(filepath: string) -> []Token {
 		start := 0
 		end := 0
 
-		line := strings.split(line_with_comment, "#")[0]
+		//line := strings.split(line_with_comment, "#")[0]
+		split_lines := strings.split(line_with_comment, "#")
+		defer delete(split_lines)
+		line := split_lines[0]
 
 		ch_next := rune('.')
 		for i in 0 ..< len(line) {
@@ -253,9 +265,9 @@ tokenize_file :: proc(filepath: string) -> []Token {
 		}
 	}
 	for t in tokens {
-		log.infof("line %d: %s (%s)", t.line_nr, t.word, t.kind)
+		log.debugf("line %d: %s (%s)", t.line_nr, t.word, t.kind)
 	}
-	log.infof("Finished tokenizing %s. Found %d tokens.", filepath, len(tokens))
+	log.debugf("Finished tokenizing %s. Found %d tokens.", filepath, len(tokens))
 	return tokens[:]
 }
 
@@ -273,7 +285,7 @@ eprint_loc_and_exit :: proc(t: Token, msg: string) {
 		fmt.eprint(" ")
 	}
 	fmt.eprintln("^")
-	fmt.eprintfln("%s:%d:%d [ERROR] %s", t.filename, t.line_nr, t.offset + 1, msg)
+	fmt.eprintfln("%s:%d:%d [CERROR] %s", t.filename, t.line_nr, t.offset + 1, msg)
 	os.exit(1)
 }
 
@@ -297,13 +309,13 @@ parse_add :: proc(parser: ^Parser) -> ^Expr {
 		expr_add := new(Expr_Add, context.temp_allocator)
 		expr_add.left = left
 		expr_add.right = right
-		log.info("( pos =", parser.pos - 1, ") return new expr")
+		log.debug("( pos =", parser.pos - 1, ") return new expr")
 		expr := new(Expr, context.temp_allocator)
 		expr.type = Expr_Type.Add
 		expr.value = expr_add
 		return expr
 	}
-	log.info("( pos =", parser.pos, ") return left")
+	log.debug("( pos =", parser.pos, ") return left")
 	return left
 }
 
@@ -330,13 +342,14 @@ parse_tokens :: proc(tokens: ^[]Token) -> []Expr {
 		tokens = tokens,
 		pos    = 0,
 	}
+
 	expressions: [dynamic]Expr
 	for parser.pos < len(parser.tokens) - 1 {
 		expr := parse_expr(&parser)
 		append(&expressions, expr^)
 	}
 
-	log.infof("Finished parsing tokens. Generated %v expressions.", len(expressions))
+	log.debugf("Finished parsing tokens. Generated %v expressions.", len(expressions))
 	fmt.println("AST:")
 	for &expr in expressions {
 		print_tree(&expr, 1)
@@ -356,7 +369,7 @@ parse_unary :: proc(parser: ^Parser) -> ^Expr {
 	case Token_Kind.Name:
 		expr_call := new(Expr_Call, context.temp_allocator)
 		expr_call.name = t.word
-		log.info("( pos =", parser.pos - 1, ") call =", t.word)
+		log.debug("( pos =", parser.pos - 1, ") call =", t.word)
 		expr_call.args = parse_args(parser)
 		expr := new(Expr, context.temp_allocator)
 		expr.type = Expr_Type.Call
@@ -365,7 +378,7 @@ parse_unary :: proc(parser: ^Parser) -> ^Expr {
 	case Token_Kind.Int:
 		expr_int := new(Expr_Int, context.temp_allocator)
 		expr_int.value = t.value.?
-		log.info("( pos =", parser.pos - 1, ") int =", t.value)
+		log.debug("( pos =", parser.pos - 1, ") int =", t.value)
 		expr := new(Expr, context.temp_allocator)
 		expr.type = Expr_Type.Int
 		expr.value = expr_int
@@ -387,6 +400,7 @@ compile_file :: proc(file_in_path: string) -> string {
 	defer delete_tokens(tokens)
 
 	expressions := parse_tokens(&tokens)
+	defer delete(expressions)
 	defer free_all(context.temp_allocator)
 
 	file_out_base := filepath.join({dir_out, file_in_stem})
@@ -410,14 +424,14 @@ compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (in
 			varnr_l - 1,
 			varnr - 1,
 		)
-		log.infof("add %%s%d = %%s%d + %%s%d", varnr, varnr_l - 1, varnr - 1)
+		log.debugf("add %%s%d = %%s%d + %%s%d", varnr, varnr_l - 1, varnr - 1)
 		return varnr + 1, true
 	case ^Expr_Call:
 		if e.name == "print" {
 			varnr, wrote := compile_expr(e.args, varnr, file_out_handle)
 			fmt.fprintfln(file_out_handle, "  # -- Expr_Call: %v()", e.name)
 			fmt.fprintfln(file_out_handle, "  call $printf(l $fmt_int, ..., l %%s%v)", varnr - 1)
-			log.infof("call print(): %%s%d", varnr - 1)
+			log.debugf("call print(): %%s%d", varnr - 1)
 			return varnr, false
 		} else {
 			assert(false, fmt.aprintf("unknown call name: '%v'; not implemented", e.name))
@@ -425,7 +439,7 @@ compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (in
 	case ^Expr_Int:
 		fmt.fprintfln(file_out_handle, "  # -- Expr_Int: %v", e.value)
 		fmt.fprintfln(file_out_handle, "  %%s%d =l copy %d", varnr, e.value)
-		log.infof("int %%s%d = %d", varnr, e.value)
+		log.debugf("int %%s%d = %d", varnr, e.value)
 		return varnr + 1, true
 	}
 	assert(false, "unreachable")
@@ -440,10 +454,10 @@ compile_to_qbe :: proc(file_out_base: string, expressions: ^[]Expr) {
 	if os.exists(file_out_qbe) {
 		err := os.remove(file_out_qbe)
 		if err == nil {
-			fmt.println("[INFO] Deleted old file", file_out_qbe)
+			fmt.println("[CINFO] Deleted old file", file_out_qbe)
 		} else {
 			fmt.eprintfln(
-				"[ERROR] Failed to remove old file '%v' due to error '%v'",
+				"[CERROR] Failed to remove old file '%v' due to error '%v'",
 				file_out_qbe,
 				err,
 			)
@@ -452,9 +466,9 @@ compile_to_qbe :: proc(file_out_base: string, expressions: ^[]Expr) {
 
 	file_out_handle, err := os.open(file_out_qbe, os.O_CREATE | os.O_WRONLY, 444)
 	if err == os.ERROR_NONE {
-		fmt.println("[INFO] Created file", file_out_qbe)
+		fmt.println("[CINFO] Created file", file_out_qbe)
 	} else {
-		fmt.eprintln("[ERROR] Could not create file", file_out_qbe, ":", err)
+		fmt.eprintln("[CERROR] Could not create file", file_out_qbe, ":", err)
 		os.exit(-1)
 	}
 	defer os.close(file_out_handle)
@@ -501,10 +515,7 @@ main :: proc() {
 	file_out_base := compile_file(file_in_path)
 	build_executable(file_out_base)
 	stdout, stderr, ok := run_executable(file_out_base)
-	asdf := "1\n5\n15\n34\n"
 	fmt.println(stdout)
-	fmt.println(asdf)
-	fmt.println("equal =", runtime.string_eq(asdf, stdout))
 	defer delete(stdout)
 	defer delete(stderr)
 }
