@@ -10,6 +10,11 @@ import "core:strconv"
 import "core:strings"
 import "core:unicode"
 
+Parser :: struct {
+	tokens: ^[]Token,
+	pos:    int,
+}
+
 Token :: struct {
 	filename: string,
 	line:     string,
@@ -31,21 +36,22 @@ Token_Kind :: enum {
 	Name,
 	Add,
 	//Minus,
-	//Mult,
-}
-
-Parser :: struct {
-	tokens: ^[]Token,
-	pos:    int,
+	Mul,
 }
 
 Expr_Type :: enum {
-	Add,
+	Binary,
 	Call,
 	Int,
 }
 
-Expr_Add :: struct {
+Expr_Binary_Type :: enum {
+	Add,
+	Mul,
+}
+
+Expr_Binary :: struct {
+	type:  Expr_Binary_Type,
 	left:  ^Expr,
 	right: ^Expr,
 }
@@ -65,7 +71,7 @@ Expr :: struct {
 }
 
 Expr_Value :: union {
-	^Expr_Add,
+	^Expr_Binary,
 	^Expr_Call,
 	^Expr_Int,
 }
@@ -152,7 +158,6 @@ tokenize_file :: proc(filepath: string) -> []Token {
 		start := 0
 		end := 0
 
-		//line := strings.split(line_with_comment, "#")[0]
 		split_lines := strings.split(line_with_comment, "#")
 		defer delete(split_lines)
 		line := split_lines[0]
@@ -194,18 +199,18 @@ tokenize_file :: proc(filepath: string) -> []Token {
 			// 	append(&tokens, t)
 			// 	start = i + 1
 			// 	continue
-			// case '*':
-			// 	t := Token {
-			// 		filename = filepath,
-			// 		line     = strings.clone(line_with_comment),
-			// 		word     = strings.clone("*"),
-			// 		line_nr  = line_number,
-			// 		offset   = i,
-			// 		kind     = Token_Kind.Mult,
-			// 	}
-			// 	append(&tokens, t)
-			// 	start = i + 1
-			// 	continue
+			case '*':
+				t := Token {
+					filename = filepath,
+					line     = strings.clone(line_with_comment),
+					word     = strings.clone("*"),
+					line_nr  = line_number,
+					offset   = i,
+					kind     = Token_Kind.Mul,
+				}
+				append(&tokens, t)
+				start = i + 1
+				continue
 			case '(':
 				t := Token {
 					filename = filepath,
@@ -299,21 +304,37 @@ expect_token :: proc(token: Token, expected_kind: Token_Kind) {
 	}
 }
 
-parse_add :: proc(parser: ^Parser) -> ^Expr {
+parse_binary :: proc(parser: ^Parser) -> ^Expr {
 	left := parse_unary(parser)
 	if left == nil {return nil}
-	if parser.pos < len(parser.tokens) && parser.tokens[parser.pos].kind == Token_Kind.Add {
-		parser.pos += 1
-		right := parse_add(parser)
-		if right == nil {return nil}
-		expr_add := new(Expr_Add, context.temp_allocator)
-		expr_add.left = left
-		expr_add.right = right
-		log.debug("( pos =", parser.pos - 1, ") return new expr")
-		expr := new(Expr, context.temp_allocator)
-		expr.type = Expr_Type.Add
-		expr.value = expr_add
-		return expr
+	if parser.pos < len(parser.tokens) {
+		if parser.tokens[parser.pos].kind == Token_Kind.Add {
+			parser.pos += 1
+			right := parse_binary(parser)
+			if right == nil {return nil}
+			expr_bin := new(Expr_Binary, context.temp_allocator)
+			expr_bin.type = Expr_Binary_Type.Add
+			expr_bin.left = left
+			expr_bin.right = right
+			log.debug("( pos =", parser.pos - 1, ") return new Expr_Binary (Add)")
+			expr := new(Expr, context.temp_allocator)
+			expr.type = Expr_Type.Binary
+			expr.value = expr_bin
+			return expr
+		} else if parser.tokens[parser.pos].kind == Token_Kind.Mul {
+			parser.pos += 1
+			right := parse_binary(parser)
+			if right == nil {return nil}
+			expr_bin := new(Expr_Binary, context.temp_allocator)
+			expr_bin.type = Expr_Binary_Type.Mul
+			expr_bin.left = left
+			expr_bin.right = right
+			log.debug("( pos =", parser.pos - 1, ") return new Expr_Binary (Mul)")
+			expr := new(Expr, context.temp_allocator)
+			expr.type = Expr_Type.Binary
+			expr.value = expr_bin
+			return expr
+		}
 	}
 	log.debug("( pos =", parser.pos, ") return left")
 	return left
@@ -334,7 +355,7 @@ parse_args :: proc(parser: ^Parser) -> ^Expr {
 }
 
 parse_expr :: proc(parser: ^Parser) -> ^Expr {
-	return parse_add(parser)
+	return parse_binary(parser)
 }
 
 parse_tokens :: proc(tokens: ^[]Token) -> []Expr {
@@ -387,7 +408,10 @@ parse_unary :: proc(parser: ^Parser) -> ^Expr {
 		assert(false, "unreachable")
 	case Token_Kind.Rpar:
 		assert(false, "unreachable")
-	case Token_Kind.Add: // nothing to do
+	case Token_Kind.Add:
+		assert(false, "unreachable")
+	case Token_Kind.Mul:
+		assert(false, "unreachable")
 	}
 	return nil
 }
@@ -412,19 +436,32 @@ compile_file :: proc(file_in_path: string) -> string {
 
 compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (int, bool) {
 	switch &e in expr.value {
-	case ^Expr_Add:
+	case ^Expr_Binary:
 		varnr_l, wrote_l := compile_expr(e.left, varnr, file_out_handle)
 		varnr, wrote := compile_expr(e.right, varnr + 1, file_out_handle)
 		assert(varnr >= 2, "Expected at least two variables to perform + on.")
-		fmt.fprintln(file_out_handle, "  # -- Expr_Add")
-		fmt.fprintfln(
-			file_out_handle,
-			"  %%s%d =l add %%s%d, %%s%d",
-			varnr,
-			varnr_l - 1,
-			varnr - 1,
-		)
-		log.debugf("add %%s%d = %%s%d + %%s%d", varnr, varnr_l - 1, varnr - 1)
+		if e.type == Expr_Binary_Type.Add {
+			fmt.fprintln(file_out_handle, "  # -- Expr_Binary (Add)")
+			fmt.fprintfln(
+				file_out_handle,
+				"  %%s%d =l add %%s%d, %%s%d",
+				varnr,
+				varnr_l - 1,
+				varnr - 1,
+			)
+			log.debugf("add %%s%d = %%s%d + %%s%d", varnr, varnr_l - 1, varnr - 1)
+		} else if e.type == Expr_Binary_Type.Mul {
+
+			fmt.fprintln(file_out_handle, "  # -- Expr_Binary (Mul)")
+			fmt.fprintfln(
+				file_out_handle,
+				"  %%s%d =l mul %%s%d, %%s%d",
+				varnr,
+				varnr_l - 1,
+				varnr - 1,
+			)
+			log.debugf("mul %%s%d = %%s%d + %%s%d", varnr, varnr_l - 1, varnr - 1)
+		}
 		return varnr + 1, true
 	case ^Expr_Call:
 		if e.name == "print" {
@@ -492,8 +529,12 @@ print_tree :: proc(expr: ^Expr, depth: int) -> int {
 	d := depth + 1
 
 	switch e in expr^.value {
-	case ^Expr_Add:
-		fmt.println("Add:")
+	case ^Expr_Binary:
+		if e.type == Expr_Binary_Type.Add {
+			fmt.println("Add:")
+		} else if e.type == Expr_Binary_Type.Mul {
+			fmt.println("Mul:")
+		}
 		print_tree(e^.left, d)
 		print_tree(e^.right, d)
 		return d - 1
@@ -511,7 +552,8 @@ print_tree :: proc(expr: ^Expr, depth: int) -> int {
 main :: proc() {
 	context.logger = log.create_console_logger()
 
-	file_in_path := "programs/01_print_sums.prola"
+	//file_in_path := "programs/01_print_sums.prola"
+	file_in_path := "programs/02_print_products.prola"
 	file_out_base := compile_file(file_in_path)
 	build_executable(file_out_base)
 	stdout, stderr, ok := run_executable(file_out_base)
