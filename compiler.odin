@@ -1,5 +1,6 @@
 package main
 
+import "base:runtime"
 import "core:fmt"
 import "core:log"
 import "core:os"
@@ -74,24 +75,21 @@ build_executable :: proc(file_base: string) {
 	execute_command(fmt.aprintf("cc -o %v %v.s", file_base, file_base))
 }
 
-run_executable :: proc(file_base: string) {
-	execute_command(fmt.aprintf("./%v", file_base))
+run_executable :: proc(file_base: string) -> (string, string, bool) {
+	return execute_command_and_capture_out(fmt.aprintf("./%v", file_base))
 }
 
-execute_command_and_capture_out :: proc(cmd: string) -> (string, string) {
+execute_command_and_capture_out :: proc(cmd: string) -> (string, string, bool) {
 	state, stdout, stderr, err := os2.process_exec(
 		{command = strings.split(cmd, " ")},
 		context.allocator,
 	)
 	if err != nil {
-		fmt.eprintfln("Error '%v' while executing command '%v'", err, cmd)
+		fmt.eprintfln("Error '%v' while executing '%v'", err, cmd)
 		os.exit(1)
 	}
-	if state.success {
-		fmt.printfln("[INFO] Executing command: %v", cmd)
-		fmt.print(string(stdout))
-	} else {
-		fmt.eprintfln("[ERROR]: Executing command %v failed.", cmd)
+	if !state.success {
+		fmt.eprintfln("[ERROR]: Executing '%v' failed.", cmd)
 		fmt.eprintfln("[ERROR]: stdout:")
 		fmt.eprint(string(stdout))
 		fmt.eprintfln("[ERROR]: stderr:")
@@ -101,11 +99,15 @@ execute_command_and_capture_out :: proc(cmd: string) -> (string, string) {
 		os.exit(1)
 	}
 
-	return string(stdout), string(stderr)
+	return string(stdout), string(stderr), state.success
 }
 
 execute_command :: proc(cmd: string) {
-	stdout, stderr := execute_command_and_capture_out(cmd)
+	stdout, stderr, ok := execute_command_and_capture_out(cmd)
+	if ok {
+		fmt.printfln("[INFO] Executed: %v", cmd)
+		fmt.print(string(stdout))
+	}
 	defer delete(stdout)
 	defer delete(stderr)
 }
@@ -127,7 +129,7 @@ tokenize_file :: proc(filepath: string) -> []Token {
 	defer delete(data, context.allocator)
 
 	if ok {
-		log.info("[INFO] Read file", filepath)
+		fmt.println("[INFO] Read file", filepath)
 	} else {
 		fmt.eprintln("[ERROR] Could not read file", filepath)
 		os.exit(-1)
@@ -334,7 +336,7 @@ parse_tokens :: proc(tokens: ^[]Token) -> []Expr {
 		append(&expressions, expr^)
 	}
 
-	log.infof("Finished generating expressions. Generated %v expressions.", len(expressions))
+	log.infof("Finished parsing tokens. Generated %v expressions.", len(expressions))
 	fmt.println("AST:")
 	for &expr in expressions {
 		print_tree(&expr, 1)
@@ -377,6 +379,23 @@ parse_unary :: proc(parser: ^Parser) -> ^Expr {
 	return nil
 }
 
+compile_file :: proc(file_in_path: string) -> string {
+	dir_out := "build_prola"
+	file_in_stem := filepath.stem(filepath.base(file_in_path))
+
+	tokens := tokenize_file(file_in_path)
+	defer delete_tokens(tokens)
+
+	expressions := parse_tokens(&tokens)
+	defer free_all(context.temp_allocator)
+
+	file_out_base := filepath.join({dir_out, file_in_stem})
+
+	compile_to_qbe(file_out_base, &expressions)
+
+	return file_out_base
+}
+
 compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (int, bool) {
 	switch &e in expr.value {
 	case ^Expr_Add:
@@ -413,6 +432,47 @@ compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (in
 	return 0, false
 }
 
+
+compile_to_qbe :: proc(file_out_base: string, expressions: ^[]Expr) {
+	file_out_qbe := strings.concatenate({file_out_base, ".qbe"})
+	defer delete(file_out_qbe)
+
+	if os.exists(file_out_qbe) {
+		err := os.remove(file_out_qbe)
+		if err == nil {
+			fmt.println("[INFO] Deleted old file", file_out_qbe)
+		} else {
+			fmt.eprintfln(
+				"[ERROR] Failed to remove old file '%v' due to error '%v'",
+				file_out_qbe,
+				err,
+			)
+		}
+	}
+
+	file_out_handle, err := os.open(file_out_qbe, os.O_CREATE | os.O_WRONLY, 444)
+	if err == os.ERROR_NONE {
+		fmt.println("[INFO] Created file", file_out_qbe)
+	} else {
+		fmt.eprintln("[ERROR] Could not create file", file_out_qbe, ":", err)
+		os.exit(-1)
+	}
+	defer os.close(file_out_handle)
+
+	fmt.fprintln(file_out_handle, "export function w $main() {")
+	fmt.fprintln(file_out_handle, "@start")
+
+	varnr := 0
+	for &expr in expressions {
+		varnr2, wrote := compile_expr(&expr, varnr, file_out_handle)
+		varnr = varnr2
+	}
+
+	fmt.fprintln(file_out_handle, "  ret 0")
+	fmt.fprintln(file_out_handle, "}")
+	fmt.fprintln(file_out_handle, "data $fmt_int = { b \"%d\\n\", b 0 }")
+}
+
 print_tree :: proc(expr: ^Expr, depth: int) -> int {
 	for i in 0 ..< 2 * depth {fmt.print(" ")}
 	d := depth + 1
@@ -438,55 +498,13 @@ main :: proc() {
 	context.logger = log.create_console_logger()
 
 	file_in_path := "programs/01_print_sums.prola"
-	file_in_stem := filepath.stem(filepath.base(file_in_path))
-	dir_out := "build_prola"
-
-	tokens := tokenize_file(file_in_path)
-	defer delete_tokens(tokens)
-
-	expressions := parse_tokens(&tokens)
-	defer free_all(context.temp_allocator)
-
-	file_out_base := filepath.join({dir_out, file_in_stem})
-	file_out_qbe := strings.concatenate({file_out_base, ".qbe"})
-
-	if os.exists(file_out_qbe) {
-		err := os.remove(file_out_qbe)
-		if err == nil {
-			fmt.println("[INFO] Deleted old file", file_out_qbe)
-		} else {
-			fmt.eprintfln("[ERROR] Failed to remove old %v due to error %v", file_out_qbe, err)
-		}
-	}
-
-	file_out_handle, err := os.open(file_out_qbe, os.O_CREATE | os.O_WRONLY, 444)
-	if err == os.ERROR_NONE {
-		fmt.println("[INFO] Opened file", file_out_qbe)
-	} else {
-		fmt.eprintln("[ERROR] Could not open file", file_out_qbe, ":", err)
-		os.exit(-1)
-	}
-	defer os.close(file_out_handle)
-
-	fmt.fprintln(file_out_handle, "export function w $main() {")
-	fmt.fprintln(file_out_handle, "@start")
-
-	varnr := 0
-	for &expr in expressions {
-		varnr2, wrote := compile_expr(&expr, varnr, file_out_handle)
-		varnr = varnr2
-	}
-
-	fmt.fprintln(file_out_handle, "  ret 0")
-	fmt.fprintln(file_out_handle, "}")
-	fmt.fprintln(file_out_handle, "data $fmt_int = { b \"%d\\n\", b 0 }")
-
-	file_out, ok := os.read_entire_file(file_out_qbe, context.allocator)
-	defer delete(file_out, context.allocator)
-
-	fmt.printfln("\nContents of %v:\n", file_out_qbe)
-	fmt.print(string(file_out))
-
+	file_out_base := compile_file(file_in_path)
 	build_executable(file_out_base)
-	run_executable(file_out_base)
+	stdout, stderr, ok := run_executable(file_out_base)
+	asdf := "1\n5\n15\n34\n"
+	fmt.println(stdout)
+	fmt.println(asdf)
+	fmt.println("equal =", runtime.string_eq(asdf, stdout))
+	defer delete(stdout)
+	defer delete(stderr)
 }
