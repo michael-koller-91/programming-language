@@ -95,7 +95,7 @@ tokenize_file :: proc(filepath: string) -> []Token {
 	tokens: [dynamic]Token
 	line_number := 0
 	it := string(data)
-	line_loop: for line_with_comment in strings.split_lines_iterator(&it) {
+	for line_with_comment in strings.split_lines_iterator(&it) {
 		line_number += 1
 		start := 0
 		end := 0
@@ -319,27 +319,33 @@ parse_add :: proc(parser: ^Parser) -> ^Expr {
 compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (int, bool) {
 	switch &e in expr.value {
 	case ^Expr_Add:
-		add := expr.value.(^Expr_Add)
-		varnr, wrote := compile_expr(add.left, varnr, file_out_handle)
-		varnr, wrote = compile_expr(add.right, varnr, file_out_handle)
+		varnr_l, wrote_l := compile_expr(e.left, varnr, file_out_handle)
+		varnr, wrote := compile_expr(e.right, varnr + 1, file_out_handle)
 		assert(varnr >= 2, "Expected at least two variables to perform + on.")
-		fmt.fprintln(file_out_handle, "  # Expr_Add")
-		fmt.fprintfln(file_out_handle, "  %%s%d =l add %%s%d, %%s%d", varnr, varnr - 2, varnr - 1)
-		return varnr, true
+		fmt.fprintln(file_out_handle, "  # -- Expr_Add")
+		fmt.fprintfln(
+			file_out_handle,
+			"  %%s%d =l add %%s%d, %%s%d",
+			varnr,
+			varnr_l - 1,
+			varnr - 1,
+		)
+		log.infof("add %%s%d = %%s%d + %%s%d", varnr, varnr_l - 1, varnr - 1)
+		return varnr + 1, true
 	case ^Expr_Call:
 		if e.name == "print" {
 			varnr, wrote := compile_expr(e.args, varnr, file_out_handle)
-			fmt.fprintfln(file_out_handle, "  # Expr_Call: %v()", e.name)
-			fmt.fprintfln(file_out_handle, "  call $printf(l $fmt_int, ..., l %%s%v)", varnr)
-			return varnr + 1, false
+			fmt.fprintfln(file_out_handle, "  # -- Expr_Call: %v()", e.name)
+			fmt.fprintfln(file_out_handle, "  call $printf(l $fmt_int, ..., l %%s%v)", varnr - 1)
+			log.infof("call print(): %%s%d", varnr - 1)
+			return varnr, false
 		} else {
 			assert(false, fmt.aprintf("unknown call name: '%v'; not implemented", e.name))
 		}
 	case ^Expr_Int:
-		const_int := expr.value.(^Expr_Int)
-		fmt.fprintfln(file_out_handle, "  # Expr_Int: %v", const_int.value)
-		fmt.fprintfln(file_out_handle, "  %%s%d =l copy %d", varnr, const_int.value)
-		log.info("wrote constant = ", const_int.value)
+		fmt.fprintfln(file_out_handle, "  # -- Expr_Int: %v", e.value)
+		fmt.fprintfln(file_out_handle, "  %%s%d =l copy %d", varnr, e.value)
+		log.infof("int %%s%d = %d", varnr, e.value)
 		return varnr + 1, true
 	}
 	assert(false, "unreachable")
@@ -410,30 +416,40 @@ main :: proc() {
 	}
 	defer free_all(context.temp_allocator)
 
+	fmt.println("AST:")
+	for &expr in expressions {
+		print_tree(&expr, 1)
+	}
+
 	file_out_path := "foo.qbe"
+
+	if os.exists(file_out_path) {
+		err := os.remove(file_out_path)
+		if err == nil {
+			fmt.println("[INFO] Deleted old file", file_out_path)
+		} else {
+			fmt.eprintfln("[ERROR] Failed to remove old %v due to error %v", file_out_path, err)
+		}
+	}
+
 	file_out_handle, err := os.open(file_out_path, os.O_CREATE | os.O_WRONLY, 444)
 	if err == os.ERROR_NONE {
-		log.info("Opened file", file_out_path)
+		fmt.println("[INFO] Opened file", file_out_path)
 	} else {
 		fmt.eprintln("[ERROR] Could not open file", file_out_path, ":", err)
 		os.exit(-1)
 	}
 	defer os.close(file_out_handle)
 
-	for &expr in expressions {
-		print_tree(&expr, 0)
-	}
-
 	fmt.fprintln(file_out_handle, "export function w $main() {")
 	fmt.fprintln(file_out_handle, "@start")
-	fmt.fprintln(file_out_handle, "# -----------------------------------")
 
-
+	varnr := 0
 	for &expr in expressions {
-		compile_expr(&expr, 0, file_out_handle)
+		varnr2, wrote := compile_expr(&expr, varnr, file_out_handle)
+		varnr = varnr2
 	}
 
-	fmt.fprintln(file_out_handle, "# -----------------------------------")
 	fmt.fprintln(file_out_handle, "  ret 0")
 	fmt.fprintln(file_out_handle, "}")
 	fmt.fprintln(file_out_handle, "data $fmt_int = { b \"%d\\n\", b 0 }")
