@@ -10,8 +10,6 @@ rm qbe-1.2.tar.xz
 cd qbe-1.2
 make
 cd ..
-# copy the binary
-cp qbe-1.2/qbe ..
 # move to downloads
 mv qbe-1.2 ../downloads
 
