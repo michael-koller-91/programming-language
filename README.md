@@ -24,3 +24,18 @@ print(2 + 3 * 4) # prints 14 because 14 = 2 + (3 * 4)
 print(3 * 4 + 2) # prints 18 because 18 = 3 * (4 + 2)
 ```
 
+## Example Programs
+
+The folder [programs](programs) contains example programs.
+
+## Build Project
+
+```sh
+odin build .
+```
+
+## Run Tests
+
+```sh
+odin test .
+```
