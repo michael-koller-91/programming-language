@@ -1,7 +1,6 @@
 *.s
 
+build_prola
 downloads
-lib
 
 qbe
-zig
