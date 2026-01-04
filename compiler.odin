@@ -1,3 +1,6 @@
+// TODO: use ^Token instead of Token in proc arguments
+// TODO: handle missing closing parenthesis, e.g., 'print(1+2'
+
 package main
 
 import "base:runtime"
@@ -9,8 +12,6 @@ import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
 import "core:unicode"
-
-// TODO: use ^Token instead of Token in proc arguments
 
 Parser :: struct {
 	tokens: ^[]Token,
@@ -306,13 +307,9 @@ expect_token :: proc(token: ^Token, expected_kind: Token_Kind) {
 	}
 }
 
-advance_parser :: proc(parser: ^Parser) {
-	parser.pos += 1
-}
-
 consume_token :: proc(parser: ^Parser) -> ^Token {
 	token := get_current_token(parser)
-	advance_parser(parser)
+	parser.pos += 1
 	return token
 }
 
@@ -323,11 +320,6 @@ get_current_token :: proc(parser: ^Parser) -> ^Token {
 out_of_tokens :: proc(parser: ^Parser) -> bool {
 	return parser.pos >= len(parser.tokens)
 }
-
-//parse_binary :: proc(parser: ^Parser, left: ^Expr) -> ^Expr {
-//			advance_parser(parser)
-//			right := parse_expr(parser)
-//}
 
 make_binary_expr :: proc(type: Expr_Binary_Type, left: ^Expr, right: ^Expr) -> ^Expr {
 	expr_bin := new(Expr_Binary, context.temp_allocator)
@@ -341,28 +333,44 @@ make_binary_expr :: proc(type: Expr_Binary_Type, left: ^Expr, right: ^Expr) -> ^
 	return expr
 }
 
-parse_expr :: proc(parser: ^Parser) -> ^Expr {
+parse_binary :: proc(parser: ^Parser, left: ^Expr) -> ^Expr {
+	token := consume_token(parser)
+	right := parse_expr(parser)
+	if token.kind == Token_Kind.Add {
+		return make_binary_expr(Expr_Binary_Type.Add, left, right)
+	} else if token.kind == Token_Kind.Mul {
+		return make_binary_expr(Expr_Binary_Type.Mul, left, right)
+	}
+
+	assert(false, "unreachable")
+	return nil
+}
+
+parse_expr :: proc(parser: ^Parser) -> (expr: ^Expr) {
 	left := parse_unary(parser)
 
-	//token := get_current_token(parser)
-
-	if left == nil {return nil}
-
-	if !out_of_tokens(parser) {
-		if parser.tokens[parser.pos].kind == Token_Kind.Add {
-			advance_parser(parser)
-			right := parse_expr(parser)
-			if right == nil {return nil}
-			return make_binary_expr(Expr_Binary_Type.Add, left, right)
-		} else if parser.tokens[parser.pos].kind == Token_Kind.Mul {
-			advance_parser(parser)
-			right := parse_expr(parser)
-			if right == nil {return nil}
-			return make_binary_expr(Expr_Binary_Type.Mul, left, right)
-		}
+	if out_of_tokens(parser) {
+		return left
 	}
-	log.debug("( pos =", parser.pos, ") return left")
-	return left
+
+	token := get_current_token(parser)
+
+	switch token.kind {
+	case Token_Kind.Name:
+		expr = left
+	case Token_Kind.Int:
+		expr = left
+	case Token_Kind.Lpar:
+		expr = left
+	case Token_Kind.Rpar:
+		expr = left
+	case Token_Kind.Add:
+		expr = parse_binary(parser, left)
+	case Token_Kind.Mul:
+		expr = parse_binary(parser, left)
+	}
+
+	return
 }
 
 parse_args :: proc(parser: ^Parser) -> ^Expr {
@@ -425,14 +433,12 @@ parse_unary :: proc(parser: ^Parser) -> ^Expr {
 		expr.value = expr_int
 		return expr
 	case Token_Kind.Lpar:
-		assert(false, "unreachable")
 	case Token_Kind.Rpar:
-		assert(false, "unreachable")
 	case Token_Kind.Add:
-		assert(false, "unreachable")
 	case Token_Kind.Mul:
-		assert(false, "unreachable")
 	}
+
+	eprint_loc_and_exit(token^, "Expected a unary expression.")
 
 	return nil
 }
