@@ -10,6 +10,8 @@ import "core:strconv"
 import "core:strings"
 import "core:unicode"
 
+// TODO: use ^Token instead of Token in proc arguments
+
 Parser :: struct {
 	tokens: ^[]Token,
 	pos:    int,
@@ -295,45 +297,61 @@ eprint_loc_and_exit :: proc(t: Token, msg: string) {
 }
 
 // TODO: print Token_Kind in human readable form; maybe a proc token_kind_to_string or something
-expect_token :: proc(token: Token, expected_kind: Token_Kind) {
+expect_token :: proc(token: ^Token, expected_kind: Token_Kind) {
 	if token.kind != expected_kind {
 		eprint_loc_and_exit(
-			token,
+			token^,
 			fmt.aprintf("Expected Token_Kind %v but got %v", expected_kind, token.kind),
 		)
 	}
 }
 
-parse_binary :: proc(parser: ^Parser) -> ^Expr {
+advance_parser :: proc(parser: ^Parser) {
+	parser.pos += 1
+}
+
+get_current_token :: proc(parser: ^Parser) -> ^Token {
+	return &parser.tokens[parser.pos]
+}
+
+end_of_tokens :: proc(parser: ^Parser) -> bool {
+	return parser.pos >= len(parser.tokens)
+}
+
+//parse_binary :: proc(parser: ^Parser, left: ^Expr) -> ^Expr {
+//			advance_parser(parser)
+//			right := parse_expr(parser)
+//}
+
+make_binary_expr :: proc(type: Expr_Binary_Type, left: ^Expr, right: ^Expr) -> ^Expr {
+	expr_bin := new(Expr_Binary, context.temp_allocator)
+	expr_bin.type = type
+	expr_bin.left = left
+	expr_bin.right = right
+	expr := new(Expr, context.temp_allocator)
+	expr.type = Expr_Type.Binary
+	expr.value = expr_bin
+	log.debugf("Created binary expression of type %v", type)
+	return expr
+}
+
+parse_expr :: proc(parser: ^Parser) -> ^Expr {
 	left := parse_unary(parser)
+
+	//token := get_current_token(parser)
+
 	if left == nil {return nil}
 	if parser.pos < len(parser.tokens) {
 		if parser.tokens[parser.pos].kind == Token_Kind.Add {
-			parser.pos += 1
-			right := parse_binary(parser)
+			advance_parser(parser)
+			right := parse_expr(parser)
 			if right == nil {return nil}
-			expr_bin := new(Expr_Binary, context.temp_allocator)
-			expr_bin.type = Expr_Binary_Type.Add
-			expr_bin.left = left
-			expr_bin.right = right
-			log.debug("( pos =", parser.pos - 1, ") return new Expr_Binary (Add)")
-			expr := new(Expr, context.temp_allocator)
-			expr.type = Expr_Type.Binary
-			expr.value = expr_bin
-			return expr
+			return make_binary_expr(Expr_Binary_Type.Add, left, right)
 		} else if parser.tokens[parser.pos].kind == Token_Kind.Mul {
-			parser.pos += 1
-			right := parse_binary(parser)
+			advance_parser(parser)
+			right := parse_expr(parser)
 			if right == nil {return nil}
-			expr_bin := new(Expr_Binary, context.temp_allocator)
-			expr_bin.type = Expr_Binary_Type.Mul
-			expr_bin.left = left
-			expr_bin.right = right
-			log.debug("( pos =", parser.pos - 1, ") return new Expr_Binary (Mul)")
-			expr := new(Expr, context.temp_allocator)
-			expr.type = Expr_Type.Binary
-			expr.value = expr_bin
-			return expr
+			return make_binary_expr(Expr_Binary_Type.Mul, left, right)
 		}
 	}
 	log.debug("( pos =", parser.pos, ") return left")
@@ -341,21 +359,17 @@ parse_binary :: proc(parser: ^Parser) -> ^Expr {
 }
 
 parse_args :: proc(parser: ^Parser) -> ^Expr {
-	t := parser.tokens[parser.pos]
-	expect_token(t, Token_Kind.Lpar)
-	parser.pos += 1
+	token := get_current_token(parser)
+	expect_token(token, Token_Kind.Lpar)
+	advance_parser(parser)
 
 	expr := parse_expr(parser)
 
-	t = parser.tokens[parser.pos]
-	expect_token(t, Token_Kind.Rpar)
-	parser.pos += 1
+	token = get_current_token(parser)
+	expect_token(token, Token_Kind.Rpar)
+	advance_parser(parser)
 
 	return expr
-}
-
-parse_expr :: proc(parser: ^Parser) -> ^Expr {
-	return parse_binary(parser)
 }
 
 parse_tokens :: proc(tokens: ^[]Token) -> []Expr {
@@ -384,13 +398,15 @@ parse_unary :: proc(parser: ^Parser) -> ^Expr {
 		t := parser.tokens[len(parser.tokens) - 1]
 		eprint_loc_and_exit(t, "Expected to find a constant next but found end of file.")
 	}
-	t := parser.tokens[parser.pos]
-	parser.pos += 1
-	switch t.kind {
+
+	token := get_current_token(parser)
+	advance_parser(parser)
+
+	switch token.kind {
 	case Token_Kind.Name:
 		expr_call := new(Expr_Call, context.temp_allocator)
-		expr_call.name = t.word
-		log.debug("( pos =", parser.pos - 1, ") call =", t.word)
+		expr_call.name = token.word
+		log.debug("( pos =", parser.pos - 1, ") call =", token.word)
 		expr_call.args = parse_args(parser)
 		expr := new(Expr, context.temp_allocator)
 		expr.type = Expr_Type.Call
@@ -398,8 +414,8 @@ parse_unary :: proc(parser: ^Parser) -> ^Expr {
 		return expr
 	case Token_Kind.Int:
 		expr_int := new(Expr_Int, context.temp_allocator)
-		expr_int.value = t.value.?
-		log.debug("( pos =", parser.pos - 1, ") int =", t.value)
+		expr_int.value = token.value.?
+		log.debug("( pos =", parser.pos - 1, ") int =", token.value)
 		expr := new(Expr, context.temp_allocator)
 		expr.type = Expr_Type.Int
 		expr.value = expr_int
@@ -413,6 +429,7 @@ parse_unary :: proc(parser: ^Parser) -> ^Expr {
 	case Token_Kind.Mul:
 		assert(false, "unreachable")
 	}
+
 	return nil
 }
 
@@ -439,7 +456,7 @@ compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (in
 	case ^Expr_Binary:
 		varnr_l, wrote_l := compile_expr(e.left, varnr, file_out_handle)
 		varnr, wrote := compile_expr(e.right, varnr + 1, file_out_handle)
-		assert(varnr >= 2, "Expected at least two variables to perform + on.")
+		assert(varnr >= 2, "Expected at least two variables to perform binary operation on.")
 		if e.type == Expr_Binary_Type.Add {
 			fmt.fprintln(file_out_handle, "  # -- Expr_Binary (Add)")
 			fmt.fprintfln(
@@ -451,7 +468,6 @@ compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (in
 			)
 			log.debugf("add %%s%d = %%s%d + %%s%d", varnr, varnr_l - 1, varnr - 1)
 		} else if e.type == Expr_Binary_Type.Mul {
-
 			fmt.fprintln(file_out_handle, "  # -- Expr_Binary (Mul)")
 			fmt.fprintfln(
 				file_out_handle,
@@ -482,7 +498,6 @@ compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (in
 	assert(false, "unreachable")
 	return 0, false
 }
-
 
 compile_to_qbe :: proc(file_out_base: string, expressions: ^[]Expr) {
 	file_out_qbe := strings.concatenate({file_out_base, ".qbe"})
