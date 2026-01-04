@@ -310,11 +310,17 @@ advance_parser :: proc(parser: ^Parser) {
 	parser.pos += 1
 }
 
+consume_token :: proc(parser: ^Parser) -> ^Token {
+	token := get_current_token(parser)
+	advance_parser(parser)
+	return token
+}
+
 get_current_token :: proc(parser: ^Parser) -> ^Token {
 	return &parser.tokens[parser.pos]
 }
 
-end_of_tokens :: proc(parser: ^Parser) -> bool {
+out_of_tokens :: proc(parser: ^Parser) -> bool {
 	return parser.pos >= len(parser.tokens)
 }
 
@@ -341,7 +347,8 @@ parse_expr :: proc(parser: ^Parser) -> ^Expr {
 	//token := get_current_token(parser)
 
 	if left == nil {return nil}
-	if parser.pos < len(parser.tokens) {
+
+	if !out_of_tokens(parser) {
 		if parser.tokens[parser.pos].kind == Token_Kind.Add {
 			advance_parser(parser)
 			right := parse_expr(parser)
@@ -359,15 +366,13 @@ parse_expr :: proc(parser: ^Parser) -> ^Expr {
 }
 
 parse_args :: proc(parser: ^Parser) -> ^Expr {
-	token := get_current_token(parser)
+	token := consume_token(parser)
 	expect_token(token, Token_Kind.Lpar)
-	advance_parser(parser)
 
 	expr := parse_expr(parser)
 
-	token = get_current_token(parser)
+	token = consume_token(parser)
 	expect_token(token, Token_Kind.Rpar)
-	advance_parser(parser)
 
 	return expr
 }
@@ -394,13 +399,12 @@ parse_tokens :: proc(tokens: ^[]Token) -> []Expr {
 }
 
 parse_unary :: proc(parser: ^Parser) -> ^Expr {
-	if parser.pos >= len(parser.tokens) {
+	if out_of_tokens(parser) {
 		t := parser.tokens[len(parser.tokens) - 1]
-		eprint_loc_and_exit(t, "Expected to find a constant next but found end of file.")
+		eprint_loc_and_exit(t, "Ran out of tokens.") // TODO: How can this be turned into a useful error message?
 	}
 
-	token := get_current_token(parser)
-	advance_parser(parser)
+	token := consume_token(parser)
 
 	switch token.kind {
 	case Token_Kind.Name:
