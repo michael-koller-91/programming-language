@@ -1,5 +1,6 @@
 // TODO: use ^Token instead of Token in proc arguments
 // TODO: handle missing closing parenthesis, e.g., 'print(1+2'
+// TODO: make binary expressions left-associative
 
 package main
 
@@ -32,14 +33,15 @@ Token :: struct {
 }
 
 Token_Kind :: enum {
+	Comment,
 	Lpar, // (
 	Rpar, // )
 	Int,
 	//Float,
 	Name,
 	Add,
-	//Minus,
 	Mul,
+	Sub,
 }
 
 Expr_Type :: enum {
@@ -51,6 +53,7 @@ Expr_Type :: enum {
 Expr_Binary_Type :: enum {
 	Add,
 	Mul,
+	Sub,
 }
 
 Expr_Binary :: struct {
@@ -132,7 +135,7 @@ execute_command :: proc(cmd: string) {
 
 is_seperator :: proc(r: rune) -> (is_sep: bool) {
 	is_sep = false
-	seperators := [?]rune{'+', ' ', '\t', '(', ')'}
+	seperators := [?]rune{'+', '*', '-', ' ', '\t', '(', ')'}
 	for sep in seperators {
 		if r == sep {
 			is_sep = true
@@ -176,6 +179,7 @@ tokenize_file :: proc(filepath: string) -> []Token {
 
 			switch (ch) {
 			case '\t', '\n', '\v', '\f', '\r', ' ', 0x85, 0xa0:
+				// spaces
 				start = i + 1
 				continue
 			case '+':
@@ -190,18 +194,18 @@ tokenize_file :: proc(filepath: string) -> []Token {
 				append(&tokens, t)
 				start = i + 1
 				continue
-			// case '-':
-			// 	t := Token {
-			// 		filename = filepath,
-			// 		line     = strings.clone(line_with_comment),
-			// 		word     = strings.clone("-"),
-			// 		line_nr  = line_number,
-			// 		offset   = i,
-			// 		kind     = Token_Kind.Minus,
-			// 	}
-			// 	append(&tokens, t)
-			// 	start = i + 1
-			// 	continue
+			case '-':
+				t := Token {
+					filename = filepath,
+					line     = strings.clone(line_with_comment),
+					word     = strings.clone("-"),
+					line_nr  = line_number,
+					offset   = i,
+					kind     = Token_Kind.Sub,
+				}
+				append(&tokens, t)
+				start = i + 1
+				continue
 			case '*':
 				t := Token {
 					filename = filepath,
@@ -340,6 +344,8 @@ parse_binary :: proc(parser: ^Parser, left: ^Expr) -> ^Expr {
 		return make_binary_expr(Expr_Binary_Type.Add, left, right)
 	} else if token.kind == Token_Kind.Mul {
 		return make_binary_expr(Expr_Binary_Type.Mul, left, right)
+	} else if token.kind == Token_Kind.Sub {
+		return make_binary_expr(Expr_Binary_Type.Sub, left, right)
 	}
 
 	assert(false, "unreachable")
@@ -356,6 +362,7 @@ parse_expr :: proc(parser: ^Parser) -> (expr: ^Expr) {
 	token := get_current_token(parser)
 
 	switch token.kind {
+	case Token_Kind.Comment:
 	case Token_Kind.Name:
 		expr = left
 	case Token_Kind.Int:
@@ -367,6 +374,8 @@ parse_expr :: proc(parser: ^Parser) -> (expr: ^Expr) {
 	case Token_Kind.Add:
 		expr = parse_binary(parser, left)
 	case Token_Kind.Mul:
+		expr = parse_binary(parser, left)
+	case Token_Kind.Sub:
 		expr = parse_binary(parser, left)
 	}
 
@@ -421,6 +430,7 @@ parse_unary :: proc(parser: ^Parser) -> ^Expr {
 	token := consume_token(parser)
 
 	switch token.kind {
+	case Token_Kind.Comment:
 	case Token_Kind.Name:
 		expr_call := new(Expr_Call, context.temp_allocator)
 		expr_call.name = token.word
@@ -442,6 +452,7 @@ parse_unary :: proc(parser: ^Parser) -> ^Expr {
 	case Token_Kind.Rpar:
 	case Token_Kind.Add:
 	case Token_Kind.Mul:
+	case Token_Kind.Sub:
 	}
 
 	eprint_loc_and_exit(token^, "Expected a unary expression.")
@@ -493,7 +504,17 @@ compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (in
 				varnr - 1,
 			)
 			log.debugf("mul %%s%d = %%s%d + %%s%d", varnr, varnr_l - 1, varnr - 1)
+		} else if e.type == Expr_Binary_Type.Sub {
+			fmt.fprintln(file_out_handle, "  # -- Expr_Binary (Sub)")
+			fmt.fprintfln(
+				file_out_handle,
+				"  %%s%d =l sub %%s%d, %%s%d",
+				varnr,
+				varnr_l - 1,
+				varnr - 1,
+			)
 		}
+		log.debugf("add %%s%d = %%s%d + %%s%d", varnr, varnr_l - 1, varnr - 1)
 		return varnr + 1, true
 	case ^Expr_Call:
 		if e.name == "print" {
@@ -570,6 +591,8 @@ print_code :: proc(expr: ^Expr, depth: int) -> int {
 			fmt.print(" + ")
 		} else if e.type == Expr_Binary_Type.Mul {
 			fmt.print(" * ")
+		} else if e.type == Expr_Binary_Type.Sub {
+			fmt.print(" - ")
 		}
 		print_code(e^.right, d)
 		return d - 1
@@ -595,6 +618,8 @@ print_tree :: proc(expr: ^Expr, depth: int) -> int {
 			fmt.println("Add:")
 		} else if e.type == Expr_Binary_Type.Mul {
 			fmt.println("Mul:")
+		} else if e.type == Expr_Binary_Type.Sub {
+			fmt.println("Sub:")
 		}
 		print_tree(e^.left, d)
 		print_tree(e^.right, d)

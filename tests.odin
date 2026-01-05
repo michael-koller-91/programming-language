@@ -17,7 +17,7 @@ test_program_01 :: proc(t: ^testing.T) {
 	defer delete(stderr)
 
 	expected_stderr := ""
-	expected_stdout := "1\n5\n15\n34\n6\n120\n5040\n14\n10\n"
+	expected_stdout := "1\n5\n15\n34\n6\n120\n5040\n-1\n5\n-2\n14\n10\n"
 
 	testing.expectf(
 		t,
