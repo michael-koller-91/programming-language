@@ -377,6 +377,7 @@ parse_args :: proc(parser: ^Parser) -> ^Expr {
 	token := consume_token(parser)
 	expect_token(token, Token_Kind.Lpar)
 
+	// TODO: check if next token is Rpar to handle 'print()'?
 	expr := parse_expr(parser)
 
 	token = consume_token(parser)
@@ -402,6 +403,11 @@ parse_tokens :: proc(tokens: ^[]Token) -> []Expr {
 	for &expr in expressions {
 		print_tree(&expr, 1)
 	}
+
+	//for &expr in expressions {
+	//	print_code(&expr, 0)
+	//}
+	//fmt.println()
 
 	return expressions[:]
 }
@@ -547,6 +553,36 @@ compile_to_qbe :: proc(file_out_base: string, expressions: ^[]Expr) {
 	fmt.fprintln(file_out_handle, "  ret 0")
 	fmt.fprintln(file_out_handle, "}")
 	fmt.fprintln(file_out_handle, "data $fmt_int = { b \"%d\\n\", b 0 }")
+}
+
+// potentially a way to format code?
+print_code :: proc(expr: ^Expr, depth: int) -> int {
+	d := depth + 1
+
+	if depth == 0 {
+		fmt.println()
+	}
+
+	switch e in expr^.value {
+	case ^Expr_Binary:
+		print_code(e^.left, d)
+		if e.type == Expr_Binary_Type.Add {
+			fmt.print(" + ")
+		} else if e.type == Expr_Binary_Type.Mul {
+			fmt.print(" * ")
+		}
+		print_code(e^.right, d)
+		return d - 1
+	case ^Expr_Call:
+		fmt.printf("%v(", e^.name)
+		print_code(e^.args, d)
+		fmt.printf(")")
+		return d - 1
+	case ^Expr_Int:
+		fmt.printf("%v", e^.value)
+		return d - 1
+	}
+	return 0
 }
 
 print_tree :: proc(expr: ^Expr, depth: int) -> int {
