@@ -4,15 +4,20 @@ print(2 + 3) # 5
 print(4 + 5 + 6) # 15
 print(7 + 8 + 9 + 10) # 34
 
+# sub
+print(2 - 3) # -1
+print(4 - 5 - 6) # 5
+print(5 - 6 - 7 - 8) # -2
+
 # mul
 print(2 * 3) # 6
 print(4 * 5 * 6) # 120
 print(7 * 8 * 9 * 10) # 5040
 
-# sub
-print(2 - 3) # -1
-print(4 - 5 - 6) # 5
-print(5 - 6 - 7 - 8) # -2
+# div
+print(6 / 3) # 2
+print(12 / 12 / 3) # 3
+print(3 / 12 / 12 / 3) # 1
 
 # add, mul
 print(2 * 3 + 4) # 2 * (3 + 4) = 14
