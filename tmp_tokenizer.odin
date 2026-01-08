@@ -25,8 +25,7 @@ Token_Kind :: enum {
 Token :: struct {
 	filename: string,
 	line:     string,
-	//loc:      Loc,
-	line_nr:  int,
+	loc:      Loc,
 	kind:     Token_Kind,
 	word:     string,
 }
@@ -75,9 +74,12 @@ get_token :: proc(scanner: ^Scanner) -> Token {
 	ch := scanner.ch
 
 	kind := Token_Kind.EOF
-	line_nr := scanner.line_nr
 	word := ""
 	line := ""
+	loc := Loc {
+		line_nr = scanner.line_nr,
+		column  = scanner.curr + 1 - scanner.line_start,
+	}
 
 	switch true {
 	case unicode.is_letter(ch):
@@ -114,13 +116,7 @@ get_token :: proc(scanner: ^Scanner) -> Token {
 		}
 	}
 
-	return Token {
-		filename = scanner.filename,
-		line = line,
-		line_nr = line_nr,
-		word = word,
-		kind = kind,
-	}
+	return Token{filename = scanner.filename, line = line, loc = loc, word = word, kind = kind}
 }
 
 main :: proc() {
