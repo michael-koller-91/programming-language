@@ -1,9 +1,10 @@
 // run: odin run tmp_tokenizer.odin -file
-package foo
+package main
 
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:testing"
 import "core:unicode"
 
 Loc :: struct {
@@ -12,9 +13,8 @@ Loc :: struct {
 }
 
 
-Token_Kind :: enum {
+Token2_Kind :: enum {
 	EOF,
-	New_Line,
 	Identifier,
 	L_Par,
 	R_Par,
@@ -22,11 +22,11 @@ Token_Kind :: enum {
 	Integer,
 }
 
-Token :: struct {
+Token2 :: struct {
 	filename: string,
 	line:     string,
 	loc:      Loc,
-	kind:     Token_Kind,
+	kind:     Token2_Kind,
 	word:     string,
 }
 
@@ -40,6 +40,7 @@ Scanner :: struct {
 	ch:         rune, // character at current offset
 }
 
+// advance the scanner by one character
 consume_ch :: proc(scanner: ^Scanner) {
 	if scanner.curr + 1 < len(scanner.src) {
 		scanner.curr += 1
@@ -50,7 +51,8 @@ consume_ch :: proc(scanner: ^Scanner) {
 	}
 }
 
-get_identifier :: proc(scanner: ^Scanner) -> string {
+// consume as long as there are valid identifier characters
+consume_identifier :: proc(scanner: ^Scanner) -> string {
 	curr := scanner.curr
 	for unicode.is_letter(scanner.ch) || unicode.is_digit(scanner.ch) || scanner.ch == '_' {
 		consume_ch(scanner)
@@ -58,7 +60,7 @@ get_identifier :: proc(scanner: ^Scanner) -> string {
 	return scanner.src[curr:scanner.curr]
 }
 
-get_integer :: proc(scanner: ^Scanner) -> string {
+consume_integer :: proc(scanner: ^Scanner) -> string {
 	curr := scanner.curr
 	for unicode.is_digit(scanner.ch) || scanner.ch == '_' {
 		consume_ch(scanner)
@@ -70,10 +72,18 @@ get_line :: proc(scanner: ^Scanner) -> string {
 	return scanner.src[scanner.line_start:scanner.curr]
 }
 
-get_token :: proc(scanner: ^Scanner) -> Token {
+get_token :: proc(scanner: ^Scanner) -> Token2 {
+	// skip white spaces
+	for unicode.is_white_space(scanner.ch) {
+		if scanner.ch == '\n' {
+			scanner.line_nr += 1
+			scanner.line_start = scanner.curr + 1
+		}
+		consume_ch(scanner)
+	}
 	ch := scanner.ch
 
-	kind := Token_Kind.EOF
+	kind := Token2_Kind.EOF
 	word := ""
 	line := ""
 	loc := Loc {
@@ -84,20 +94,17 @@ get_token :: proc(scanner: ^Scanner) -> Token {
 	switch true {
 	case unicode.is_letter(ch):
 		kind = .Identifier
-		word = get_identifier(scanner)
+		word = consume_identifier(scanner)
 		line = get_line(scanner)
 	case unicode.is_digit(ch):
 		kind = .Integer
-		word = get_integer(scanner)
+		word = consume_integer(scanner)
 		line = get_line(scanner)
 	case:
 		consume_ch(scanner)
+
 		switch ch {
 		case -1:
-		case '\n':
-			scanner.line_nr += 1
-			scanner.line_start = scanner.curr
-			kind = .New_Line
 		case '+':
 			word = "+"
 			line = get_line(scanner)
@@ -116,26 +123,19 @@ get_token :: proc(scanner: ^Scanner) -> Token {
 		}
 	}
 
-	return Token{filename = scanner.filename, line = line, loc = loc, word = word, kind = kind}
+	return Token2{filename = scanner.filename, line = line, loc = loc, word = word, kind = kind}
 }
 
-main :: proc() {
-	context.logger = log.create_console_logger()
-
-	src := "print(1+23)\nfoo(bar())"
-	scanner := Scanner {
-		filename   = "",
-		src        = src,
-		line_nr    = 1,
-		line_start = 0,
-		curr       = 0,
-		ch         = rune(src[0]),
-	}
+// convert src into tokens
+tokenize :: proc(scanner: ^Scanner) -> []Token2 {
+	tokens: [dynamic]Token2
 	for {
-		token := get_token(&scanner)
-		fmt.println("token =", token)
+		token := get_token(scanner)
+		append(&tokens, token)
 		if token.kind == .EOF {
 			break
 		}
 	}
+	log.debugf("found %v tokens in file %v", len(tokens), scanner.filename)
+	return tokens[:]
 }
