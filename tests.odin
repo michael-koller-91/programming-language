@@ -35,7 +35,7 @@ test_program_01 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_tokenize_01 :: proc(t: ^testing.T) {
+test_tokenize_src_01 :: proc(t: ^testing.T) {
 	src := "foo(1 + 23  )\nbar(   baz(	))"
 
 	scanner := Scanner {
@@ -47,13 +47,13 @@ test_tokenize_01 :: proc(t: ^testing.T) {
 		ch         = rune(src[0]),
 	}
 
-	tokens := tokenize(&scanner)
-	defer delete(tokens)
+	tokens := tokenize_src(&scanner)
+	defer delete_tokens2(tokens)
 
 	testing.expect_value(t, tokens[0].kind, Token2_Kind.Identifier)
 	testing.expect_value(t, tokens[1].kind, Token2_Kind.L_Par)
 	testing.expect_value(t, tokens[2].kind, Token2_Kind.Integer)
-	testing.expect_value(t, tokens[3].kind, Token2_Kind.Plus)
+	testing.expect_value(t, tokens[3].kind, Token2_Kind.Add)
 	testing.expect_value(t, tokens[4].kind, Token2_Kind.Integer)
 	testing.expect_value(t, tokens[5].kind, Token2_Kind.R_Par)
 	testing.expect_value(t, tokens[6].kind, Token2_Kind.Identifier)

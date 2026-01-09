@@ -4,7 +4,7 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:os"
-import "core:testing"
+import "core:strings"
 import "core:unicode"
 
 Loc :: struct {
@@ -15,10 +15,11 @@ Loc :: struct {
 
 Token2_Kind :: enum {
 	EOF,
+	Comment,
 	Identifier,
 	L_Par,
 	R_Par,
-	Plus,
+	Add,
 	Integer,
 }
 
@@ -40,6 +41,14 @@ Scanner :: struct {
 	ch:         rune, // character at current offset
 }
 
+delete_tokens2 :: proc(tokens: []Token2) {
+	for t in tokens {
+		delete(t.line)
+		delete(t.word)
+	}
+	delete(tokens)
+}
+
 // advance the scanner by one character
 consume_ch :: proc(scanner: ^Scanner) {
 	if scanner.curr + 1 < len(scanner.src) {
@@ -51,25 +60,34 @@ consume_ch :: proc(scanner: ^Scanner) {
 	}
 }
 
+consume_comment :: proc(scanner: ^Scanner) -> string {
+	curr := scanner.curr
+	for scanner.ch != '\n' && scanner.ch != -1 {
+		consume_ch(scanner)
+	}
+	return strings.clone(scanner.src[curr:scanner.curr])
+}
+
 // consume as long as there are valid identifier characters
 consume_identifier :: proc(scanner: ^Scanner) -> string {
 	curr := scanner.curr
 	for unicode.is_letter(scanner.ch) || unicode.is_digit(scanner.ch) || scanner.ch == '_' {
 		consume_ch(scanner)
 	}
-	return scanner.src[curr:scanner.curr]
+	return strings.clone(scanner.src[curr:scanner.curr])
 }
 
+// consume as long as there are valid integer characters
 consume_integer :: proc(scanner: ^Scanner) -> string {
 	curr := scanner.curr
 	for unicode.is_digit(scanner.ch) || scanner.ch == '_' {
 		consume_ch(scanner)
 	}
-	return scanner.src[curr:scanner.curr]
+	return strings.clone(scanner.src[curr:scanner.curr])
 }
 
 get_line :: proc(scanner: ^Scanner) -> string {
-	return scanner.src[scanner.line_start:scanner.curr]
+	return strings.clone(scanner.src[scanner.line_start:scanner.curr])
 }
 
 get_token :: proc(scanner: ^Scanner) -> Token2 {
@@ -106,17 +124,21 @@ get_token :: proc(scanner: ^Scanner) -> Token2 {
 		switch ch {
 		case -1:
 		case '+':
-			word = "+"
+			word = strings.clone("+")
 			line = get_line(scanner)
-			kind = .Plus
+			kind = .Add
 		case '(':
-			word = "("
+			word = strings.clone("(")
 			line = get_line(scanner)
 			kind = .L_Par
 		case ')':
-			word = ")"
+			word = strings.clone(")")
 			line = get_line(scanner)
 			kind = .R_Par
+		case '#':
+			word = consume_comment(scanner)
+			line = get_line(scanner)
+			kind = .Comment
 		case:
 			fmt.eprintfln("[CERROR] Not a supported character: %q", ch)
 			os.exit(1)
@@ -127,7 +149,7 @@ get_token :: proc(scanner: ^Scanner) -> Token2 {
 }
 
 // convert src into tokens
-tokenize :: proc(scanner: ^Scanner) -> []Token2 {
+tokenize_src :: proc(scanner: ^Scanner) -> []Token2 {
 	tokens: [dynamic]Token2
 	for {
 		token := get_token(scanner)
@@ -136,6 +158,30 @@ tokenize :: proc(scanner: ^Scanner) -> []Token2 {
 			break
 		}
 	}
-	log.debugf("found %v tokens in file %v", len(tokens), scanner.filename)
+	log.debugf("Finished tokenizing %s. Found %d tokens.", scanner.filename, len(tokens))
 	return tokens[:]
+}
+
+tokenize_file2 :: proc(filepath: string) -> []Token2 {
+	data, ok := os.read_entire_file(filepath, context.allocator)
+	defer delete(data, context.allocator)
+
+	if ok {
+		fmt.println("[CINFO] Read file", filepath)
+	} else {
+		fmt.eprintln("[CERROR] Could not read file", filepath)
+		os.exit(-1)
+	}
+
+	src := string(data)
+	scanner := Scanner {
+		filename   = filepath,
+		src        = src,
+		line_nr    = 1,
+		line_start = 0,
+		curr       = 0,
+		ch         = rune(src[0]),
+	}
+
+	return tokenize_src(&scanner)
 }
