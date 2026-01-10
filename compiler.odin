@@ -12,61 +12,10 @@ import "core:os/os2"
 import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
-import "core:unicode"
 
 Parser :: struct {
 	tokens: ^[]Token,
 	pos:    int,
-}
-
-Token :: struct {
-	filename: string,
-	line:     string,
-	word:     string,
-	line_nr:  int,
-	offset:   int,
-	kind:     Token_Kind,
-	value:    union {
-		int,
-		f64,
-	},
-}
-
-Token_Kind :: enum {
-	Comment,
-	Lpar, // (
-	Rpar, // )
-	Int,
-	Name,
-	Add,
-	Div,
-	Mul,
-	Sub,
-}
-
-token_kind_str :: proc(t: Token_Kind) -> string {
-	switch t {
-	case .Comment:
-		return "#"
-	case .Lpar:
-		return "("
-	case .Rpar:
-		return ")"
-	case .Int:
-		return "integer"
-	case .Name:
-		return "identifier"
-	case .Add:
-		return "+"
-	case .Div:
-		return "/"
-	case .Mul:
-		return "*"
-	case .Sub:
-		return "-"
-	}
-	assert(false, "unreachable")
-	return ""
 }
 
 Expr_Type :: enum {
@@ -171,200 +120,53 @@ is_seperator :: proc(r: rune) -> (is_sep: bool) {
 	return
 }
 
-tokenize_file :: proc(filepath: string) -> []Token {
-	data, ok := os.read_entire_file(filepath, context.allocator)
-	defer delete(data, context.allocator)
-
-	if ok {
-		fmt.println("[CINFO] Read file", filepath)
-	} else {
-		fmt.eprintln("[CERROR] Could not read file", filepath)
-		os.exit(-1)
-	}
-
-	tokens: [dynamic]Token
-	line_number := 0
-	it := string(data)
-	for line_with_comment in strings.split_lines_iterator(&it) {
-		line_number += 1
-		start := 0
-		end := 0
-
-		split_lines := strings.split(line_with_comment, "#")
-		defer delete(split_lines)
-		line := split_lines[0]
-
-		ch_next := rune('.')
-		for i in 0 ..< len(line) {
-			ch := rune(line[i])
-			if i + 1 < len(line) {
-				ch_next = rune(line[i + 1])
-			} else {
-				ch_next = rune(' ')
-			}
-
-			switch (ch) {
-			case '\t', '\n', '\v', '\f', '\r', ' ', 0x85, 0xa0:
-				// spaces
-				start = i + 1
-				continue
-			case '+':
-				t := Token {
-					filename = filepath,
-					line     = strings.clone(line_with_comment),
-					word     = strings.clone("+"),
-					line_nr  = line_number,
-					offset   = i,
-					kind     = Token_Kind.Add,
-				}
-				append(&tokens, t)
-				start = i + 1
-				continue
-			case '-':
-				t := Token {
-					filename = filepath,
-					line     = strings.clone(line_with_comment),
-					word     = strings.clone("-"),
-					line_nr  = line_number,
-					offset   = i,
-					kind     = Token_Kind.Sub,
-				}
-				append(&tokens, t)
-				start = i + 1
-				continue
-			case '*':
-				t := Token {
-					filename = filepath,
-					line     = strings.clone(line_with_comment),
-					word     = strings.clone("*"),
-					line_nr  = line_number,
-					offset   = i,
-					kind     = Token_Kind.Mul,
-				}
-				append(&tokens, t)
-				start = i + 1
-				continue
-			case '/':
-				t := Token {
-					filename = filepath,
-					line     = strings.clone(line_with_comment),
-					word     = strings.clone("/"),
-					line_nr  = line_number,
-					offset   = i,
-					kind     = Token_Kind.Div,
-				}
-				append(&tokens, t)
-				start = i + 1
-				continue
-			case '(':
-				t := Token {
-					filename = filepath,
-					line     = strings.clone(line_with_comment),
-					word     = strings.clone("("),
-					line_nr  = line_number,
-					offset   = i,
-					kind     = Token_Kind.Lpar,
-				}
-				append(&tokens, t)
-				start = i + 1
-				continue
-			case ')':
-				t := Token {
-					filename = filepath,
-					line     = strings.clone(line_with_comment),
-					word     = strings.clone(")"),
-					line_nr  = line_number,
-					offset   = i,
-					kind     = Token_Kind.Rpar,
-				}
-				append(&tokens, t)
-				start = i + 1
-				continue
-			case:
-				if is_seperator(ch_next) {
-					end = i
-					t := Token {
-						filename = filepath,
-						line     = strings.clone(line_with_comment),
-						word     = strings.clone(line[start:end + 1]),
-						line_nr  = line_number,
-						offset   = start,
-					}
-					if unicode.is_digit(rune(line[start])) {
-						n, ok := strconv.parse_int(t.word)
-						if ok {
-							t.kind = Token_Kind.Int
-							t.value = n
-						} else {
-							// n, ok := strconv.parse_f64(t.word)
-							// if ok {
-							// 	t.kind = Token_Kind.Float
-							// 	t.value = n
-							// } else {
-							eprint_loc_and_exit(t, "Could not parse as int.")
-							// }
-						}
-					} else {
-						t.kind = Token_Kind.Name
-					}
-					start = i + 1
-					append(&tokens, t)
-					continue
-				}
-			}
-		}
-	}
-	for t in tokens {
-		log.debugf("line %d: %s (%s)", t.line_nr, t.word, t.kind)
-	}
-	log.debugf("Finished tokenizing %s. Found %d tokens.", filepath, len(tokens))
-	return tokens[:]
-}
-
-delete_tokens :: proc(tokens: []Token) {
-	for t in tokens {
-		delete(t.line)
-		delete(t.word)
-	}
-	delete(tokens)
-}
-
 eprint_loc_and_exit :: proc(t: Token, msg: string) {
 	fmt.eprintln(t.line)
-	for i in 0 ..< t.offset {
+	for i in 0 ..< t.loc.column {
 		fmt.eprint(" ")
 	}
 	fmt.eprintln("^")
-	fmt.eprintfln("%s:%d:%d [CERROR] %s", t.filename, t.line_nr, t.offset + 1, msg)
+	fmt.eprintfln("%s:%d:%d [CERROR] %s", t.filename, t.loc.line_nr, t.loc.column + 1, msg)
 	os.exit(1)
 }
 
-// TODO: print Token_Kind in human readable form; maybe a proc token_kind_to_string or something
 expect_token :: proc(token: ^Token, expected_kind: Token_Kind) {
 	if token.kind != expected_kind {
 		eprint_loc_and_exit(
 			token^,
 			fmt.aprintf(
 				"Expected '%v' but got '%v'",
-				token_kind_str(expected_kind),
-				token_kind_str(token.kind),
+				token_kind_str[expected_kind],
+				token_kind_str[token.kind],
 			),
 		)
 	}
 }
 
 consume_token :: proc(parser: ^Parser) -> ^Token {
-	token := get_current_token(parser)
 	parser.pos += 1
-	return token
+	return &parser.tokens[parser.pos - 1]
+}
+
+peek_token :: proc(parser: ^Parser) -> ^Token {
+	token := get_current_token(parser)
+	if token.kind == .EOF {
+		return token
+	} else {
+		return &parser.tokens[parser.pos + 1]
+	}
 }
 
 get_current_token :: proc(parser: ^Parser) -> ^Token {
+	// skip comments
+	for parser.tokens[parser.pos].kind == .Comment {
+		consume_token(parser)
+	}
 	return &parser.tokens[parser.pos]
 }
 
 out_of_tokens :: proc(parser: ^Parser) -> bool {
-	return parser.pos >= len(parser.tokens)
+	return peek_token(parser).kind == .EOF
 }
 
 make_binary_expr :: proc(type: Expr_Binary_Type, left: ^Expr, right: ^Expr) -> ^Expr {
@@ -396,6 +198,12 @@ parse_binary :: proc(parser: ^Parser, left: ^Expr) -> ^Expr {
 	return nil
 }
 
+consume_comment_tokens :: proc(parser: ^Parser) {
+	if get_current_token(parser).kind == .Comment {
+		consume_token(parser)
+	}
+}
+
 parse_expr :: proc(parser: ^Parser) -> (expr: ^Expr) {
 	left := parse_unary(parser)
 
@@ -407,13 +215,15 @@ parse_expr :: proc(parser: ^Parser) -> (expr: ^Expr) {
 
 	switch token.kind {
 	case Token_Kind.Comment:
-	case Token_Kind.Name:
+	case Token_Kind.COUNT:
+	case Token_Kind.EOF:
+	case Token_Kind.Identifier:
 		expr = left
-	case Token_Kind.Int:
+	case Token_Kind.Integer:
 		expr = left
-	case Token_Kind.Lpar:
+	case Token_Kind.L_Par:
 		expr = left
-	case Token_Kind.Rpar:
+	case Token_Kind.R_Par:
 		expr = left
 	case Token_Kind.Add:
 		expr = parse_binary(parser, left)
@@ -430,13 +240,13 @@ parse_expr :: proc(parser: ^Parser) -> (expr: ^Expr) {
 
 parse_args :: proc(parser: ^Parser) -> ^Expr {
 	token := consume_token(parser)
-	expect_token(token, Token_Kind.Lpar)
+	expect_token(token, Token_Kind.L_Par)
 
-	// TODO: check if next token is Rpar to handle 'print()'?
+	// TODO: check if next token is R_Par to handle 'print()'?
 	expr := parse_expr(parser)
 
 	token = consume_token(parser)
-	expect_token(token, Token_Kind.Rpar)
+	expect_token(token, Token_Kind.R_Par)
 
 	return expr
 }
@@ -448,9 +258,11 @@ parse_tokens :: proc(tokens: ^[]Token) -> []Expr {
 	}
 
 	expressions: [dynamic]Expr
-	for parser.pos < len(parser.tokens) - 1 {
+	for get_current_token(&parser).kind != .EOF {
+		//consume_comment_tokens(&parser)
 		expr := parse_expr(&parser)
 		append(&expressions, expr^)
+		//consume_comment_tokens(&parser)
 	}
 
 	log.debugf("Finished parsing tokens. Generated %v expressions.", len(expressions))
@@ -468,16 +280,18 @@ parse_tokens :: proc(tokens: ^[]Token) -> []Expr {
 }
 
 parse_unary :: proc(parser: ^Parser) -> ^Expr {
-	if out_of_tokens(parser) {
-		t := parser.tokens[len(parser.tokens) - 1]
-		eprint_loc_and_exit(t, "Ran out of tokens.") // TODO: How can this be turned into a useful error message?
-	}
+	//if out_of_tokens(parser) {
+	//	t := parser.tokens[len(parser.tokens) - 1]
+	//	eprint_loc_and_exit(t, "Ran out of tokens.") // TODO: How can this be turned into a useful error message?
+	//}
 
 	token := consume_token(parser)
 
 	switch token.kind {
 	case Token_Kind.Comment:
-	case Token_Kind.Name:
+	case Token_Kind.COUNT:
+	case Token_Kind.EOF:
+	case Token_Kind.Identifier:
 		expr_call := new(Expr_Call, context.temp_allocator)
 		expr_call.name = token.word
 		log.debug("( pos =", parser.pos - 1, ") call =", token.word)
@@ -486,16 +300,16 @@ parse_unary :: proc(parser: ^Parser) -> ^Expr {
 		expr.type = Expr_Type.Call
 		expr.value = expr_call
 		return expr
-	case Token_Kind.Int:
+	case Token_Kind.Integer:
 		expr_int := new(Expr_Int, context.temp_allocator)
-		expr_int.value = token.value.?
-		log.debug("( pos =", parser.pos - 1, ") int =", token.value)
+		expr_int.value, _ = strconv.parse_int(token.word)
+		log.debug("( pos =", parser.pos - 1, ") int =", token.word)
 		expr := new(Expr, context.temp_allocator)
 		expr.type = Expr_Type.Int
 		expr.value = expr_int
 		return expr
-	case Token_Kind.Lpar:
-	case Token_Kind.Rpar:
+	case Token_Kind.L_Par:
+	case Token_Kind.R_Par:
 	case Token_Kind.Add:
 	case Token_Kind.Div:
 	case Token_Kind.Mul:
@@ -542,7 +356,7 @@ compile_expr :: proc(expr: ^Expr, varnr: int, file_out_handle: os.Handle) -> (in
 			)
 			log.debugf("add %%s%d = %%s%d + %%s%d", varnr, varnr_l - 1, varnr - 1)
 		} else if e.type == Expr_Binary_Type.Div {
-			fmt.fprintln(file_out_handle, "  # -- Expr_Binary (Mul)")
+			fmt.fprintln(file_out_handle, "  # -- Expr_Binary (Div)")
 			fmt.fprintfln(
 				file_out_handle,
 				"  %%s%d =l div %%s%d, %%s%d",

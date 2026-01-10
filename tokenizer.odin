@@ -11,22 +11,38 @@ Loc :: struct {
 	column:  int,
 }
 
-
-Token2_Kind :: enum {
+Token_Kind :: enum {
 	EOF,
 	Comment, // #
 	Identifier,
 	L_Par, // (
 	R_Par, // )
 	Add, // +
+	Div, // /
+	Mul, // *
+	Sub, // -
 	Integer,
+	COUNT,
 }
 
-Token2 :: struct {
+token_kind_str := [Token_Kind.COUNT]string {
+	"EOF",
+	"Comment",
+	"Identifier",
+	"(",
+	")",
+	"+",
+	"/",
+	"*",
+	"-",
+	"Integer",
+}
+
+Token :: struct {
 	filename: string,
 	line:     string,
 	loc:      Loc,
-	kind:     Token2_Kind,
+	kind:     Token_Kind,
 	word:     string,
 }
 
@@ -39,7 +55,7 @@ Scanner :: struct {
 	ch:         rune, // character at current offset
 }
 
-delete_tokens2 :: proc(tokens: []Token2) {
+delete_tokens :: proc(tokens: []Token) {
 	for t in tokens {
 		delete(t.line)
 		delete(t.word)
@@ -88,7 +104,7 @@ get_line :: proc(scanner: ^Scanner) -> string {
 	return strings.clone(scanner.src[scanner.line_start:scanner.curr])
 }
 
-get_token :: proc(scanner: ^Scanner) -> Token2 {
+get_token :: proc(scanner: ^Scanner) -> Token {
 	// skip white spaces
 	for unicode.is_white_space(scanner.ch) {
 		if scanner.ch == '\n' {
@@ -99,7 +115,7 @@ get_token :: proc(scanner: ^Scanner) -> Token2 {
 	}
 	ch := scanner.ch
 
-	kind := Token2_Kind.EOF
+	kind := Token_Kind.EOF
 	word := ""
 	line := ""
 	loc := Loc {
@@ -125,6 +141,18 @@ get_token :: proc(scanner: ^Scanner) -> Token2 {
 			word = strings.clone("+")
 			line = get_line(scanner)
 			kind = .Add
+		case '/':
+			word = strings.clone("/")
+			line = get_line(scanner)
+			kind = .Div
+		case '*':
+			word = strings.clone("*")
+			line = get_line(scanner)
+			kind = .Mul
+		case '-':
+			word = strings.clone("-")
+			line = get_line(scanner)
+			kind = .Sub
 		case '(':
 			word = strings.clone("(")
 			line = get_line(scanner)
@@ -143,7 +171,7 @@ get_token :: proc(scanner: ^Scanner) -> Token2 {
 		}
 	}
 
-	return Token2{filename = scanner.filename, line = line, loc = loc, word = word, kind = kind}
+	return Token{filename = scanner.filename, line = line, loc = loc, word = word, kind = kind}
 }
 
 init_scanner :: proc(filename: string, src: string) -> Scanner {
@@ -156,8 +184,8 @@ init_scanner :: proc(filename: string, src: string) -> Scanner {
 }
 
 // convert src into tokens
-tokenize_src :: proc(scanner: ^Scanner) -> []Token2 {
-	tokens: [dynamic]Token2
+tokenize_src :: proc(scanner: ^Scanner) -> []Token {
+	tokens: [dynamic]Token
 	for {
 		token := get_token(scanner)
 		append(&tokens, token)
@@ -169,7 +197,7 @@ tokenize_src :: proc(scanner: ^Scanner) -> []Token2 {
 	return tokens[:]
 }
 
-tokenize_file2 :: proc(filepath: string) -> []Token2 {
+tokenize_file :: proc(filepath: string) -> []Token {
 	data, ok := os.read_entire_file(filepath, context.allocator)
 	defer delete(data, context.allocator)
 
