@@ -3,7 +3,7 @@ package main
 import "base:runtime"
 import "core:testing"
 
-//@(test)
+@(test)
 test_program_01 :: proc(t: ^testing.T) {
 	file_in_path := "programs/01_arithmetics.prola"
 
