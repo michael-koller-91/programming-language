@@ -1,4 +1,3 @@
-// run: odin run tmp_tokenizer.odin -file
 package main
 
 import "core:fmt"
@@ -15,11 +14,11 @@ Loc :: struct {
 
 Token2_Kind :: enum {
 	EOF,
-	Comment,
+	Comment, // #
 	Identifier,
-	L_Par,
-	R_Par,
-	Add,
+	L_Par, // (
+	R_Par, // )
+	Add, // +
 	Integer,
 }
 
@@ -36,7 +35,6 @@ Scanner :: struct {
 	src:        string,
 	line_nr:    int,
 	line_start: int, // where did the current line start
-	//ch_read:    int, // number of characters already read
 	curr:       int, // current offset
 	ch:         rune, // character at current offset
 }
@@ -148,6 +146,15 @@ get_token :: proc(scanner: ^Scanner) -> Token2 {
 	return Token2{filename = scanner.filename, line = line, loc = loc, word = word, kind = kind}
 }
 
+init_scanner :: proc(filename: string, src: string) -> Scanner {
+	ch := ' '
+	if len(src) > 0 {
+		ch = rune(src[0])
+	}
+
+	return Scanner{filename = filename, src = src, line_nr = 1, line_start = 0, curr = 0, ch = ch}
+}
+
 // convert src into tokens
 tokenize_src :: proc(scanner: ^Scanner) -> []Token2 {
 	tokens: [dynamic]Token2
@@ -174,14 +181,7 @@ tokenize_file2 :: proc(filepath: string) -> []Token2 {
 	}
 
 	src := string(data)
-	scanner := Scanner {
-		filename   = filepath,
-		src        = src,
-		line_nr    = 1,
-		line_start = 0,
-		curr       = 0,
-		ch         = rune(src[0]),
-	}
+	scanner := init_scanner(filepath, src)
 
 	return tokenize_src(&scanner)
 }
